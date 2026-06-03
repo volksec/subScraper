@@ -1467,7 +1467,10 @@ def render_template_args(template: str, context: Dict[str, Any], tool: str) -> L
 
     def replacer(match: re.Match) -> str:
         key = match.group(1).upper()
-        return str(context.get(key, ""))
+        val = context.get(key)
+        if val is None:
+            return "''"
+        return str(val)
 
     try:
         expanded = re.sub(r"\$(\w+)\$", replacer, str(template))
@@ -1479,7 +1482,7 @@ def render_template_args(template: str, context: Dict[str, Any], tool: str) -> L
     except ValueError as exc:
         log(f"Template parse error for {tool}: {exc}")
         parsed = expanded.split()
-    return [arg for arg in parsed if str(arg).strip()]
+    return parsed
 
 
 def apply_template_flags(
@@ -3040,8 +3043,7 @@ def load_config() -> Dict[str, Any]:
             key = row[0]
             try:
                 value = json.loads(row[1])
-                if key in cfg:
-                    cfg[key] = value
+                cfg[key] = value
             except json.JSONDecodeError:
                 pass
     else:
@@ -3154,11 +3156,14 @@ def _normalize_tld_list(value: Any) -> List[str]:
     return result
 
 
-def expand_wildcard_targets(raw: str, config: Optional[Dict[str, Any]] = None) -> List[str]:
+def expand_wildcard_targets(raw: str, config: Optional[Dict[str, Any]] = None) -> List[Tuple[str, bool]]:
     """
     Expand wildcard targets from input string. Supports multiple domains
     separated by commas or newlines.
-    
+
+    Returns a list of (domain, is_broad) tuples where is_broad is True when the
+    original input contained a subdomain wildcard (*.example.com).
+
     Examples:
       Single domain: "example.com"
       Wildcard: "*.example.com"
@@ -3166,19 +3171,18 @@ def expand_wildcard_targets(raw: str, config: Optional[Dict[str, Any]] = None) -
       Multiple domains: "example.com, test.com" or "example.com\ntest.com"
       Multiple wildcards: "*.example.com\n*.test.com"
     """
-    # Parse multiple domains from input
     domain_inputs = _parse_multiple_domains(raw)
     if not domain_inputs:
         return []
-    
-    all_candidates: List[str] = []
-    
-    # Process each domain input
+
+    all_candidates: List[Tuple[str, bool]] = []
+
     for domain_input in domain_inputs:
         normalized = _sanitize_domain_input(domain_input)
         if not normalized:
             continue
-        
+
+        is_broad = normalized.startswith("*.")
         while normalized.startswith("*."):
             normalized = normalized[2:]
         trailing_any_tld = normalized.endswith(".*")
@@ -3187,27 +3191,25 @@ def expand_wildcard_targets(raw: str, config: Optional[Dict[str, Any]] = None) -
         normalized = normalized.strip(".")
         if not normalized:
             continue
-        
-        # Expand TLD wildcards if present
+
         if trailing_any_tld:
             cfg = config or get_config()
             tlds = _normalize_tld_list(cfg.get("wildcard_tlds"))
             for suffix in tlds:
                 if not suffix:
                     continue
-                all_candidates.append(f"{normalized}.{suffix}")
+                all_candidates.append((f"{normalized}.{suffix}", is_broad))
         else:
-            all_candidates.append(normalized)
-    
-    # Deduplicate results
-    deduped: List[str] = []
+            all_candidates.append((normalized, is_broad))
+
+    deduped: List[Tuple[str, bool]] = []
     seen: set = set()
-    for candidate in all_candidates:
-        cleaned = candidate.strip(".")
+    for domain, broad in all_candidates:
+        cleaned = domain.strip(".")
         if not cleaned or cleaned in seen:
             continue
         seen.add(cleaned)
-        deduped.append(cleaned)
+        deduped.append((cleaned, broad))
     return deduped
 
 
@@ -3608,26 +3610,36 @@ def load_completed_jobs() -> Dict[str, Dict[str, Any]]:
 
 
 def save_completed_jobs() -> None:
-    """Save completed jobs to SQLite database."""
+    """Save completed jobs to SQLite database, removing stale entries."""
     with JOB_LOCK:
         jobs_to_save = copy.deepcopy(COMPLETED_JOBS)
-    
+
     try:
         db = get_db()
         cursor = db.cursor()
         now = datetime.now(timezone.utc).isoformat()
-        
+
+        # Remove keys that no longer exist in memory
+        if jobs_to_save:
+            placeholders = ",".join("?" * len(jobs_to_save))
+            cursor.execute(
+                f"DELETE FROM completed_jobs WHERE job_key NOT IN ({placeholders})",
+                list(jobs_to_save.keys()),
+            )
+        else:
+            cursor.execute("DELETE FROM completed_jobs")
+
         for job_key, job_data in jobs_to_save.items():
             domain = job_key.rsplit("_", 1)[0] if "_" in job_key else job_key
             completed_at = job_data.get("completed_at", now)
-            
+
             cursor.execute(
-                """INSERT OR REPLACE INTO completed_jobs 
-                   (job_key, domain, data, completed_at, created_at) 
+                """INSERT OR REPLACE INTO completed_jobs
+                   (job_key, domain, data, completed_at, created_at)
                    VALUES (?, ?, ?, ?, ?)""",
-                (job_key, domain, json.dumps(job_data), completed_at, now)
+                (job_key, domain, json.dumps(job_data), completed_at, now),
             )
-        
+
         db.commit()
     except Exception as e:
         log(f"Error saving completed jobs: {e}")
@@ -4128,6 +4140,12 @@ def ensure_tool_installed(tool: str) -> bool:
     log(f"Installation instructions for {tool}:")
     print("\n" + get_tool_installation_instructions(tool))
     return False
+
+
+def check_tool(name: str) -> bool:
+    """Return True if the tool executable is available on PATH."""
+    cmd = TOOLS.get(name, name)
+    return shutil.which(cmd) is not None
 
 
 def ensure_required_tools() -> None:
@@ -6089,7 +6107,21 @@ def ensure_target_state(state: Dict[str, Any], domain: str) -> Dict[str, Any]:
     return tgt
 
 
-def add_subdomains_to_state(state: Dict[str, Any], domain: str, subs: List[str], source: str) -> None:
+def add_subdomains_to_state(state_or_domain, domain_or_subs=None, subs_or_source=None, source=None) -> None:
+    if source is None:
+        # Called as add_subdomains_to_state(domain, subs, source)
+        domain = state_or_domain
+        subs = domain_or_subs
+        source = subs_or_source
+        state = load_state()
+        _add_subdomains_to_state_impl(state, domain, subs, source)
+        save_state(state)
+    else:
+        # Called as add_subdomains_to_state(state, domain, subs, source)
+        _add_subdomains_to_state_impl(state_or_domain, domain_or_subs, subs_or_source, source)
+
+
+def _add_subdomains_to_state_impl(state: Dict[str, Any], domain: str, subs: List[str], source: str) -> None:
     tgt = ensure_target_state(state, domain)
     submap = tgt["subdomains"]
     for s in subs:
@@ -6616,8 +6648,11 @@ def run_pipeline(
 # ================== JOB SCHEDULER ==================
 
 def count_active_jobs_locked() -> int:
-    return sum(1 for job in RUNNING_JOBS.values()
-               if job.get("thread") and job["thread"].is_alive())
+    return sum(
+        1 for job in RUNNING_JOBS.values()
+        if job.get("status") == "dispatching"
+        or (job.get("thread") and job["thread"].is_alive())
+    )
 
 
 def _start_job_thread(job: Dict[str, Any]) -> None:
@@ -6722,6 +6757,15 @@ def init_job_steps(skip_nikto: bool) -> Dict[str, Dict[str, Any]]:
     if skip_nikto:
         steps["nikto"] = make_step_entry(status="skipped", message="Nikto skipped", progress=0)
     return steps
+
+
+def calculate_job_progress(steps: Dict[str, Any]) -> int:
+    """Return 0-100 progress for a steps dict (used standalone, without a job wrapper)."""
+    active = [e for e in steps.values() if e.get("status") not in {"skipped"}]
+    if not active:
+        return 0
+    total_progress = sum(STEP_PROGRESS.get(e.get("status"), 0) for e in active)
+    return min(100, max(0, int(total_progress / len(active))))
 
 
 def recalc_job_progress(job: Dict[str, Any]) -> None:
@@ -8684,7 +8728,7 @@ function linkifyLogText(text) {
   const escaped = escapeHtml(text || '');
   
   // Pattern to match result file names (nikto_*.json, nuclei_*.json, httpx_*.json, etc.)
-  const filePattern = /(nikto_[a-zA-Z0-9._-]+\.json|nuclei_[a-zA-Z0-9._-]+\.json|httpx_[a-zA-Z0-9._-]+\.json|ffuf_[a-zA-Z0-9._-]+\.json)/g;
+  const filePattern = /(nikto_[a-zA-Z0-9._-]+\\.json|nuclei_[a-zA-Z0-9._-]+\\.json|httpx_[a-zA-Z0-9._-]+\\.json|ffuf_[a-zA-Z0-9._-]+\\.json)/g;
   
   // Replace file references with download links
   return escaped.replace(filePattern, (match) => {
@@ -12884,7 +12928,7 @@ def snapshot_workers() -> Dict[str, Any]:
 def build_targets_csv(state: Dict[str, Any]) -> bytes:
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["domain", "subdomains", "http_entries", "nuclei_findings", "nikto_findings", "screenshots"])
+    writer.writerow(["Domain", "Subdomains", "HTTP Entries", "Nuclei Findings", "Nikto Findings", "Screenshots"])
     targets = state.get("targets", {})
     for domain, info in sorted(targets.items()):
         subs = info.get("subdomains", {})
@@ -13253,7 +13297,7 @@ def start_targets_from_input(domain_input: str, wordlist: Optional[str],
         return False, "Domain is required.", []
     details: List[Dict[str, Any]] = []
     success_any = False
-    for target in targets:
+    for target, _is_broad in targets:
         success, message = start_pipeline_job(target, wordlist, skip_nikto, interval)
         if success:
             success_any = True
@@ -16688,7 +16732,7 @@ def main():
             else:
                 log("No valid targets resolved from input.")
             return
-        for target in targets:
+        for target, _is_broad in targets:
             log(f"Running single pipeline execution for {target}.")
             try:
                 run_pipeline(target, args.wordlist, skip_nikto=args.skip_nikto, interval=args.interval)

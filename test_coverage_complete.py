@@ -182,28 +182,38 @@ class TestHTTPRequestHandling:
         handler.send_header = Mock()
         handler.end_headers = Mock()
         handler.wfile = Mock()
-        
+        # _send_json delegates to _send_bytes; patch _send_bytes to verify the call chain
+        handler._send_bytes = Mock()
+
         payload = {'success': True, 'data': 'test'}
-        
-        # Call the method
+
         main.CommandCenterHandler._send_json(handler, payload)
-        
-        # Verify response was sent
-        handler.send_response.assert_called_once()
-        handler.send_header.assert_called()
-        handler.end_headers.assert_called_once()
+
+        # _send_bytes should have been called with the encoded JSON
+        handler._send_bytes.assert_called_once()
+        args, kwargs = handler._send_bytes.call_args
+        import json as _json
+        assert _json.loads(args[0]) == payload
     
     def test_do_get_api_state(self):
         """Test GET /api/state endpoint"""
-        handler = Mock(spec=main.CommandCenterHandler)
+        handler = Mock()
         handler.path = '/api/state'
         handler._send_json = Mock()
-        
-        with patch('main.build_state_payload', return_value={'test': 'data'}):
+        handler._require_auth = Mock(return_value={'username': 'admin', 'role': 'admin'})
+        handler.headers = Mock()
+        handler.headers.get = Mock(return_value=None)
+        handler.send_response = Mock()
+        handler.send_header = Mock()
+        handler.end_headers = Mock()
+        handler.wfile = Mock()
+
+        fake_payload = {'test': 'data'}
+        with patch('main.get_cached_state_payload', return_value=('etag123', fake_payload)):
             main.CommandCenterHandler.do_GET(handler)
-        
-        # Should have called _send_json
-        handler._send_json.assert_called_once()
+
+        # Should have written a response
+        handler.send_response.assert_called_once()
     
     def test_do_get_api_settings(self):
         """Test GET /api/settings endpoint"""
@@ -454,17 +464,19 @@ class TestSystemResourceMonitoring:
     
     def test_check_resource_thresholds(self):
         """Test checking resource thresholds"""
-        # Mock resource data
         mock_data = {
-            'cpu_percent': 80.0,
-            'memory_percent': 75.0
+            'available': True,
+            'cpu': {'percent': 80.0},
+            'memory': {'percent': 75.0},
+            'disk': {'percent': 50.0},
         }
-        
-        result = main.check_resource_thresholds(mock_data, 85.0, 90.0)
-        
-        # Should return tuple (within_cpu_limit, within_memory_limit)
-        assert isinstance(result, tuple)
-        assert len(result) == 2
+
+        result = main.check_resource_thresholds(mock_data)
+
+        # Returns a list of warning dicts
+        assert isinstance(result, list)
+        # cpu at 80% should trigger a warning (>75 threshold)
+        assert any(w.get('resource') == 'cpu' for w in result)
 
 
 class TestRateLimiting:

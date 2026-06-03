@@ -879,18 +879,26 @@ class TestConfigurationManagement:
         self.temp_dir = tempfile.mkdtemp()
         self.original_data_dir = main.DATA_DIR
         self.original_config_file = main.CONFIG_FILE
+        self.original_db_file = main.DB_FILE
+        self.original_db_conn = main.DB_CONN
         main.DATA_DIR = Path(self.temp_dir)
         main.CONFIG_FILE = main.DATA_DIR / "config.json"
+        main.DB_FILE = main.DATA_DIR / "test_recon.db"
+        main.DB_CONN = None
         main.ensure_dirs()
         main.init_database()
         # Clear config cache
         with main.CONFIG_LOCK:
             main.CONFIG.clear()
-    
+
     def teardown_method(self):
         """Cleanup"""
+        if main.DB_CONN:
+            main.DB_CONN.close()
         main.DATA_DIR = self.original_data_dir
         main.CONFIG_FILE = self.original_config_file
+        main.DB_FILE = self.original_db_file
+        main.DB_CONN = self.original_db_conn
         import shutil
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
@@ -1082,7 +1090,7 @@ class TestDomainHandling:
         assert main._sanitize_domain_input('EXAMPLE.COM') == 'example.com'
         assert main._sanitize_domain_input('  example.com  ') == 'example.com'
         assert main._sanitize_domain_input('example.com\n\r') == 'example.com'
-        assert main._sanitize_domain_input('http://example.com') == 'http://example.com'
+        assert main._sanitize_domain_input('http://example.com') == 'example.com'
     
     def test_is_subdomain_input(self):
         """Test subdomain detection"""
@@ -1097,19 +1105,20 @@ class TestDomainHandling:
         """Test wildcard TLD expansion"""
         config = main.default_config()
         config['wildcard_tlds'] = ['com', 'net', 'org']
-        
+
         # Test wildcard expansion
         targets = main.expand_wildcard_targets('example.*', config)
-        assert 'example.com' in targets
-        assert 'example.net' in targets
-        assert 'example.org' in targets
+        domains = [d for d, _ in targets]
+        assert 'example.com' in domains
+        assert 'example.net' in domains
+        assert 'example.org' in domains
         assert len(targets) == 3
-    
+
     def test_expand_wildcard_targets_no_wildcard(self):
         """Test that non-wildcard input returns as-is"""
         config = main.default_config()
         targets = main.expand_wildcard_targets('example.com', config)
-        assert targets == ['example.com']
+        assert targets == [('example.com', False)]
 
 
 class TestJobManagement:
@@ -1194,13 +1203,22 @@ class TestJobManagement:
     def test_job_queue_snapshot(self):
         """Test job queue snapshot"""
         with main.JOB_LOCK:
-            main.JOB_QUEUE.append('test1.com')
-            main.JOB_QUEUE.append('test2.com')
-        
+            for domain in ('test1.com', 'test2.com'):
+                main.RUNNING_JOBS[domain] = {
+                    'domain': domain,
+                    'status': 'queued',
+                    'thread': None,
+                    'wordlist': None,
+                    'skip_nikto': False,
+                    'interval': 30,
+                }
+                main.JOB_QUEUE.append(domain)
+
         snapshot = main.job_queue_snapshot()
         assert len(snapshot) == 2
-        assert 'test1.com' in snapshot
-        assert 'test2.com' in snapshot
+        domains = [entry['domain'] for entry in snapshot]
+        assert 'test1.com' in domains
+        assert 'test2.com' in domains
 
 
 class TestLockingMechanisms:
