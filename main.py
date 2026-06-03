@@ -7246,33 +7246,329 @@ button:hover { background:#1d4ed8; }
   .app-shell { flex-direction:column; }
   .sidebar { width:100%; height:auto; position:relative; }
 }
+
+/* ── Custom scrollbar ───────────────────────────────────── */
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-track { background:#0b152c; }
+::-webkit-scrollbar-thumb { background:#1e3a5f; border-radius:3px; }
+::-webkit-scrollbar-thumb:hover { background:#2563eb; }
+
+/* ── Toast notifications ────────────────────────────────── */
+#toast-container {
+  position:fixed; bottom:24px; right:24px; z-index:9999;
+  display:flex; flex-direction:column; gap:10px; pointer-events:none;
+}
+.toast {
+  display:flex; align-items:flex-start; gap:12px;
+  min-width:280px; max-width:420px;
+  padding:14px 18px; border-radius:12px;
+  background:#1e293b; border:1px solid #334155;
+  box-shadow:0 8px 24px rgba(0,0,0,0.4);
+  pointer-events:all; opacity:0; transform:translateY(12px);
+  transition:opacity .25s ease, transform .25s ease;
+  font-size:14px; line-height:1.4;
+}
+.toast.show { opacity:1; transform:translateY(0); }
+.toast.hide { opacity:0; transform:translateY(12px); }
+.toast-icon { font-size:18px; flex-shrink:0; margin-top:1px; }
+.toast-body { flex:1; }
+.toast-title { font-weight:700; margin-bottom:2px; }
+.toast-msg { color:#94a3b8; font-size:13px; }
+.toast.success { border-left:4px solid #22c55e; }
+.toast.success .toast-icon { color:#22c55e; }
+.toast.success .toast-title { color:#bbf7d0; }
+.toast.error { border-left:4px solid #ef4444; }
+.toast.error .toast-icon { color:#ef4444; }
+.toast.error .toast-title { color:#fecaca; }
+.toast.warning { border-left:4px solid #f59e0b; }
+.toast.warning .toast-icon { color:#f59e0b; }
+.toast.warning .toast-title { color:#fde68a; }
+.toast.info { border-left:4px solid #3b82f6; }
+.toast.info .toast-icon { color:#3b82f6; }
+.toast.info .toast-title { color:#bfdbfe; }
+
+/* ── Nav badges ─────────────────────────────────────────── */
+.nav-link { position:relative; }
+.nav-badge {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:20px; padding:0 6px;
+  border-radius:999px; font-size:11px; font-weight:700;
+  background:#ef4444; color:#fff; margin-left:8px;
+  line-height:1; vertical-align:middle;
+  transition:transform .2s ease, background .2s ease;
+}
+.nav-badge.badge-blue { background:#2563eb; }
+.nav-badge.badge-yellow { background:#d97706; }
+.nav-badge.badge-zero { display:none; }
+
+/* ── Critical alert banner ──────────────────────────────── */
+#critical-banner {
+  display:none; position:sticky; top:0; z-index:100;
+  background:linear-gradient(90deg,#7f1d1d,#991b1b);
+  border-bottom:1px solid #dc2626;
+  padding:10px 32px; gap:12px; align-items:center;
+  font-size:13px; font-weight:600; color:#fecaca;
+}
+#critical-banner.show { display:flex; }
+#critical-banner .banner-icon { font-size:18px; }
+#critical-banner .banner-close {
+  margin-left:auto; background:none; border:none;
+  color:#fca5a5; cursor:pointer; font-size:18px; padding:0; margin-top:0;
+}
+#critical-banner a { color:#fbbf24; text-decoration:underline; }
+
+/* ── Copy button ────────────────────────────────────────── */
+.copy-btn {
+  display:inline-flex; align-items:center; gap:4px;
+  background:none; border:1px solid #334155; border-radius:6px;
+  color:#94a3b8; font-size:11px; padding:2px 7px;
+  cursor:pointer; transition:all .15s ease;
+  margin:0; margin-left:6px; font-weight:500; vertical-align:middle;
+}
+.copy-btn:hover { background:#1e293b; color:#e2e8f0; border-color:#475569; }
+.copy-btn.copied { border-color:#22c55e; color:#22c55e; background:rgba(34,197,94,.1); }
+
+/* ── Keyboard shortcut overlay ──────────────────────────── */
+#kbd-overlay {
+  position:fixed; inset:0; background:rgba(2,6,23,.85); z-index:9000;
+  display:none; align-items:center; justify-content:center;
+}
+#kbd-overlay.show { display:flex; }
+.kbd-modal {
+  background:#0f172a; border:1px solid #1e293b; border-radius:18px;
+  padding:28px 32px; min-width:380px; max-width:520px;
+  box-shadow:0 25px 60px rgba(0,0,0,.6);
+}
+.kbd-modal h3 { margin:0 0 20px; color:#fbbf24; font-size:18px; }
+.kbd-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px 24px; }
+.kbd-row { display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid #1e293b; }
+.kbd-label { font-size:13px; color:#94a3b8; }
+kbd {
+  display:inline-block; padding:2px 8px; border-radius:5px;
+  background:#1e293b; border:1px solid #334155;
+  font-size:12px; font-family:monospace; color:#e2e8f0;
+  box-shadow:0 2px 0 #0f172a;
+}
+
+/* ── Global search overlay ──────────────────────────────── */
+#search-overlay {
+  position:fixed; inset:0; background:rgba(2,6,23,.9); z-index:8000;
+  display:none; align-items:flex-start; justify-content:center;
+  padding-top:80px;
+}
+#search-overlay.show { display:flex; }
+.search-modal {
+  background:#0f172a; border:1px solid #1e293b; border-radius:14px;
+  width:90%; max-width:560px; overflow:hidden;
+  box-shadow:0 25px 60px rgba(0,0,0,.6);
+}
+.search-input-wrap {
+  display:flex; align-items:center; gap:12px; padding:14px 18px;
+  border-bottom:1px solid #1e293b;
+}
+.search-input-wrap svg { color:#475569; flex-shrink:0; }
+#global-search-input {
+  flex:1; background:none; border:none; outline:none;
+  color:#e2e8f0; font-size:16px; font-family:inherit;
+}
+#global-search-input::placeholder { color:#475569; }
+.search-results { max-height:360px; overflow-y:auto; }
+.search-result-item {
+  display:flex; align-items:center; gap:12px;
+  padding:10px 18px; cursor:pointer; transition:background .1s;
+  font-size:14px;
+}
+.search-result-item:hover, .search-result-item.active { background:#1e293b; }
+.search-result-type { font-size:11px; color:#475569; padding:2px 6px; border-radius:4px; background:#0b152c; }
+.search-result-label { font-weight:600; color:#e2e8f0; flex:1; }
+.search-result-sub { font-size:12px; color:#64748b; }
+.search-empty { padding:24px; text-align:center; color:#475569; font-size:14px; }
+
+/* ── Improved empty states ──────────────────────────────── */
+.empty-state {
+  display:flex; flex-direction:column; align-items:center; gap:12px;
+  padding:48px 24px; text-align:center;
+}
+.empty-state .empty-icon { font-size:40px; opacity:.5; }
+.empty-state .empty-title { font-size:16px; font-weight:600; color:#e2e8f0; }
+.empty-state .empty-desc { font-size:13px; color:#64748b; max-width:280px; line-height:1.5; }
+.empty-state .btn { margin-top:4px; }
+
+/* ── Loading button state ───────────────────────────────── */
+button.loading, .btn.loading {
+  position:relative; pointer-events:none; opacity:.8;
+}
+button.loading::after, .btn.loading::after {
+  content:''; position:absolute; right:12px; top:50%;
+  transform:translateY(-50%);
+  width:14px; height:14px; border-radius:50%;
+  border:2px solid rgba(255,255,255,.3);
+  border-top-color:#fff;
+  animation:spin .6s linear infinite;
+}
+@keyframes spin { to { transform:translateY(-50%) rotate(360deg); } }
+
+/* ── Stats card improvements ────────────────────────────── */
+.stat-card { position:relative; overflow:hidden; transition:transform .15s ease, box-shadow .15s ease; }
+.stat-card:hover { transform:translateY(-2px); box-shadow:0 6px 20px rgba(0,0,0,.3); }
+.stat-card .value { transition:color .3s ease; }
+.stat-card.has-activity .value { color:#60a5fa; }
+.stat-card.has-critical .value { color:#f87171; }
+.stat-card .stat-trend {
+  position:absolute; bottom:10px; right:14px;
+  font-size:11px; font-weight:600; color:#64748b;
+}
+
+/* ── Sticky table headers ───────────────────────────────── */
+.targets-table thead th,
+.reports-table thead th,
+.monitor-entry-table thead th {
+  position:sticky; top:0; z-index:1;
+  background:#162132; box-shadow:0 1px 0 #1f2937;
+}
+.table-wrapper { max-height:520px; overflow-y:auto; }
+
+/* ── Improved module header ─────────────────────────────── */
+.module-header h2 {
+  background:linear-gradient(90deg,#fbbf24,#fb923c);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+
+/* ── Sidebar quick-launch button ────────────────────────── */
+.sidebar-launch-btn {
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  padding:10px; border-radius:10px;
+  background:linear-gradient(135deg,#1d4ed8,#2563eb);
+  border:none; color:#fff; font-weight:600; font-size:14px;
+  cursor:pointer; transition:all .2s ease; text-decoration:none;
+  box-shadow:0 4px 12px rgba(37,99,235,.3);
+}
+.sidebar-launch-btn:hover {
+  background:linear-gradient(135deg,#1e40af,#1d4ed8);
+  box-shadow:0 6px 18px rgba(37,99,235,.45);
+  transform:translateY(-1px);
+}
+
+/* ── Job card improvements ──────────────────────────────── */
+.job-card { transition:box-shadow .2s ease; }
+.job-card:hover { box-shadow:0 0 0 1px #2563eb40; }
+.job-card.status-running { border-left:3px solid #3b82f6; }
+.job-card.status-paused { border-left:3px solid #facc15; }
+.job-card.status-failed { border-left:3px solid #ef4444; }
+.job-card.status-completed { border-left:3px solid #22c55e; }
+
+/* ── Severity legend ────────────────────────────────────── */
+.severity-legend {
+  display:flex; flex-wrap:wrap; gap:8px;
+  padding:10px 14px; background:#050b18;
+  border:1px solid #1e293b; border-radius:10px;
+  margin-bottom:14px; font-size:12px;
+}
+.severity-legend-item { display:flex; align-items:center; gap:5px; }
+
+/* ── Section search bar improvements ───────────────────── */
+.section-search {
+  padding:8px 12px; border-radius:8px;
+  border:1px solid #1f2937; background:#050b18;
+  color:var(--text); font-size:13px; min-width:200px;
+  transition:border-color .2s ease;
+}
+.section-search:focus { outline:none; border-color:#2563eb; }
+
+/* ── Improved report nav cards ──────────────────────────── */
+.report-nav-card { transition:all .15s ease; }
+.report-nav-card:hover { border-color:#334155; transform:translateX(2px); }
+.report-nav-card.has-critical { border-left:3px solid #ef4444; }
+.report-nav-card.has-high { border-left:3px solid #f97316; }
+
+/* ── Connection indicator ───────────────────────────────── */
+#conn-indicator {
+  display:inline-flex; align-items:center; gap:6px;
+  font-size:11px; color:#64748b;
+}
+#conn-dot {
+  width:8px; height:8px; border-radius:50%; background:#22c55e;
+  transition:background .3s ease;
+  box-shadow:0 0 0 2px rgba(34,197,94,.2);
+}
+#conn-dot.offline { background:#ef4444; box-shadow:0 0 0 2px rgba(239,68,68,.2); }
+#conn-dot.syncing { background:#f59e0b; animation:pulse-dot .8s ease infinite; }
+@keyframes pulse-dot { 0%,100% { opacity:1; } 50% { opacity:.4; } }
 </style>
 </head>
 <body>
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<!-- Critical findings banner -->
+<div id="critical-banner">
+  <span class="banner-icon">🚨</span>
+  <span id="critical-banner-text">Critical/High severity findings detected.</span>
+  <a href="#reports" id="critical-banner-link" onclick="setView('reports')">View Reports →</a>
+  <button class="banner-close" onclick="document.getElementById('critical-banner').classList.remove('show')">✕</button>
+</div>
+
+<!-- Keyboard shortcut overlay -->
+<div id="kbd-overlay" onclick="if(event.target===this)closeKbd()">
+  <div class="kbd-modal">
+    <h3>⌨️ Keyboard Shortcuts</h3>
+    <div class="kbd-grid">
+      <div class="kbd-row"><span class="kbd-label">Global search</span><kbd>Ctrl</kbd><kbd>K</kbd></div>
+      <div class="kbd-row"><span class="kbd-label">Show shortcuts</span><kbd>?</kbd></div>
+      <div class="kbd-row"><span class="kbd-label">Close / Cancel</span><kbd>Esc</kbd></div>
+      <div class="kbd-row"><span class="kbd-label">Go to Overview</span><kbd>G</kbd><kbd>O</kbd></div>
+      <div class="kbd-row"><span class="kbd-label">Go to Jobs</span><kbd>G</kbd><kbd>J</kbd></div>
+      <div class="kbd-row"><span class="kbd-label">Go to Reports</span><kbd>G</kbd><kbd>R</kbd></div>
+      <div class="kbd-row"><span class="kbd-label">Go to Launch</span><kbd>G</kbd><kbd>L</kbd></div>
+      <div class="kbd-row"><span class="kbd-label">Go to Logs</span><kbd>G</kbd><kbd>G</kbd></div>
+      <div class="kbd-row"><span class="kbd-label">Refresh data</span><kbd>R</kbd></div>
+    </div>
+    <button style="margin-top:20px;width:100%;background:#1f2937;" onclick="closeKbd()">Close</button>
+  </div>
+</div>
+
+<!-- Global search overlay -->
+<div id="search-overlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal">
+    <div class="search-input-wrap">
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input id="global-search-input" type="text" placeholder="Search domains, subdomains, findings…" autocomplete="off" />
+      <kbd style="flex-shrink:0">Esc</kbd>
+    </div>
+    <div class="search-results" id="search-results">
+      <div class="search-empty">Start typing to search…</div>
+    </div>
+  </div>
+</div>
+
 <div class="app-shell">
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-icon">🛰️</div>
       <div>
-        <div class="brand-title">Recon Command Center</div>
-        <div class="muted">Your bounty HQ</div>
+        <div class="brand-title">subScraper</div>
+        <div class="muted" id="conn-indicator"><span id="conn-dot"></span><span id="conn-status">Connected</span></div>
       </div>
     </div>
+    <a class="sidebar-launch-btn" href="#launch" data-view="launch" onclick="event.preventDefault();setView('launch')">
+      ＋ New Scan
+    </a>
     <nav class="nav">
-      <a class="nav-link" data-view="overview" href="#overview">Overview</a>
-      <a class="nav-link" data-view="launch" href="#launch">Launch Scan</a>
-      <a class="nav-link" data-view="jobs" href="#jobs">Active Jobs</a>
-      <a class="nav-link" data-view="workers" href="#workers">Workers</a>
-      <a class="nav-link" data-view="resources" href="#resources">System Resources</a>
-      <a class="nav-link" data-view="queue" href="#queue">Queue</a>
-      <a class="nav-link" data-view="reports" href="#reports">Reports</a>
-      <a class="nav-link" data-view="gallery" href="#gallery">Gallery</a>
-      <a class="nav-link" data-view="logs" href="#logs">Logs</a>
-      <a class="nav-link" data-view="monitors" href="#monitors">Monitors</a>
-      <a class="nav-link" data-view="targets" href="#targets">Targets</a>
-      <a class="nav-link" data-view="settings" href="#settings">Settings</a>
-      <a class="nav-link" data-view="database" href="#database">Database</a>
-      <a class="nav-link" data-view="guide" href="#guide">User Guide</a>
+      <a class="nav-link" data-view="overview" href="#overview">🗺 Overview</a>
+      <a class="nav-link" data-view="launch" href="#launch">🚀 Launch Scan</a>
+      <a class="nav-link" data-view="jobs" href="#jobs">⚡ Active Jobs <span class="nav-badge badge-blue badge-zero" id="badge-jobs">0</span></a>
+      <a class="nav-link" data-view="workers" href="#workers">🔧 Workers</a>
+      <a class="nav-link" data-view="resources" href="#resources">📊 System Resources</a>
+      <a class="nav-link" data-view="queue" href="#queue">🕐 Queue <span class="nav-badge badge-yellow badge-zero" id="badge-queue">0</span></a>
+      <a class="nav-link" data-view="reports" href="#reports">📋 Reports <span class="nav-badge badge-zero" id="badge-critical">0</span></a>
+      <a class="nav-link" data-view="gallery" href="#gallery">🖼 Gallery</a>
+      <a class="nav-link" data-view="logs" href="#logs">📜 Logs</a>
+      <a class="nav-link" data-view="monitors" href="#monitors">👁 Monitors</a>
+      <a class="nav-link" data-view="targets" href="#targets">🎯 Targets <span class="nav-badge badge-blue badge-zero" id="badge-targets">0</span></a>
+      <a class="nav-link" data-view="settings" href="#settings">⚙ Settings</a>
+      <a class="nav-link" data-view="database" href="#database">🗄 Database</a>
+      <a class="nav-link" data-view="guide" href="#guide">📖 User Guide</a>
     </nav>
     <div class="sidebar-footer">
       <div id="user-info" style="padding: 12px; background: #0f172a; border-radius: 8px; margin-bottom: 12px;">
@@ -7280,7 +7576,10 @@ button:hover { background:#1d4ed8; }
         <div style="font-weight: 600; margin-bottom: 8px;" id="username-display">Loading...</div>
         <button onclick="logout()" style="width: 100%; padding: 8px; background: #dc2626; margin-top: 0;">Logout</button>
       </div>
-      Outputs live in <code>recon_data/</code>. Keep this UI open while jobs run.
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <span>Outputs in <code>recon_data/</code></span>
+        <button onclick="showKbd()" style="background:none;border:1px solid #1e293b;border-radius:6px;color:#64748b;font-size:11px;padding:3px 7px;margin:0;cursor:pointer;" title="Keyboard shortcuts">?</button>
+      </div>
     </div>
   </aside>
   <main class="main-content">
@@ -7291,20 +7590,20 @@ button:hover { background:#1d4ed8; }
       </div>
       <div class="module-body">
         <div class="stats-grid">
-          <div class="stat-card">
-            <div class="label">Active Jobs</div>
+          <div class="stat-card" onclick="setView('jobs')" style="cursor:pointer" title="View active jobs">
+            <div class="label">⚡ Active Jobs</div>
             <div class="value" id="stat-active">0</div>
           </div>
-          <div class="stat-card">
-            <div class="label">Queued Jobs</div>
+          <div class="stat-card" onclick="setView('queue')" style="cursor:pointer" title="View job queue">
+            <div class="label">🕐 Queued</div>
             <div class="value" id="stat-queued">0</div>
           </div>
-          <div class="stat-card">
-            <div class="label">Tracked Targets</div>
+          <div class="stat-card" onclick="setView('targets')" style="cursor:pointer" title="View all targets">
+            <div class="label">🎯 Tracked Targets</div>
             <div class="value" id="stat-targets">0</div>
           </div>
-          <div class="stat-card">
-            <div class="label">Known Subdomains</div>
+          <div class="stat-card" onclick="setView('reports')" style="cursor:pointer" title="View reports">
+            <div class="label">🔍 Known Subdomains</div>
             <div class="value" id="stat-subdomains">0</div>
           </div>
         </div>
@@ -7322,7 +7621,7 @@ button:hover { background:#1d4ed8; }
     </section>
 
     <section class="module" data-view="launch">
-      <div class="module-header"><h2>Launch Scan</h2></div>
+      <div class="module-header"><h2>🚀 Launch Scan</h2></div>
       <div class="module-body">
         <div class="grid-two">
           <div class="card">
@@ -7331,32 +7630,40 @@ button:hover { background:#1d4ed8; }
               <label for="launch-domain">Domain(s) / TLD(s)
                 <textarea id="launch-domain" name="domain" rows="4" placeholder="example.com&#10;*.test.com, *.corp.com&#10;*.subdomain.example.*" required aria-required="true" aria-describedby="domain-help"></textarea>
                 <small id="domain-help" style="color: #94a3b8; font-size: 0.85rem; display: block; margin-top: 4px;">
-                  Enter one or more domains/wildcards. Separate with commas or newlines.
+                  Enter one or more domains/wildcards — commas or newlines.
                 </small>
               </label>
               <label for="launch-wordlist">Wordlist path (optional)
-                <input id="launch-wordlist" type="text" name="wordlist" placeholder="./w.txt" />
+                <input id="launch-wordlist" type="text" name="wordlist" placeholder="./wordlists/subdomains.txt" />
               </label>
-              <label for="launch-interval">Dashboard interval seconds
-                <input id="launch-interval" type="number" name="interval" min="5" />
+              <label for="launch-interval">Refresh interval (seconds)
+                <input id="launch-interval" type="number" name="interval" min="5" placeholder="30" />
               </label>
               <label class="checkbox">
                 <input id="launch-skip-nikto" type="checkbox" name="skip_nikto" />
                 Skip Nikto for this run
               </label>
-              <button type="submit">Start Recon</button>
+              <button type="submit" style="width:100%;margin-top:20px;padding:12px;font-size:16px;">🚀 Start Recon</button>
             </form>
             <div class="status" id="launch-status"></div>
           </div>
-          <div class="card">
-            <h3>Quick Tips</h3>
-            <ul class="tips">
-              <li>Enter a domain like <code>example.com</code> or use a wildcard suffix such as <code>example.*</code> to fan out across configured TLDs.</li>
-              <li>Prefix with <code>*.</code> to scan a sub-scope, e.g., <code>*.apps.example.com</code>.</li>
-              <li>Provide a wordlist path if you want ffuf vhost brute-forcing; leave it blank to skip ffuf automatically.</li>
-              <li>Jobs queue safely when worker slots are full. Configure concurrency limits in Settings.</li>
-              <li>Targets reuse the shared <code>state.json</code>, so reruns pick up where they left off.</li>
-            </ul>
+          <div>
+            <div class="card" style="margin-bottom:16px;">
+              <h3>💡 Quick Tips</h3>
+              <ul class="tips">
+                <li>Enter <code>example.com</code> for a single target or <code>example.*</code> to fan out across configured TLDs.</li>
+                <li>Prefix with <code>*.</code> for broad scope: <code>*.apps.example.com</code> scans the sub-scope.</li>
+                <li>Leave wordlist blank to skip ffuf vhost brute-forcing.</li>
+                <li>Jobs queue safely when worker slots are full — configure limits in Settings.</li>
+                <li>Reruns pick up where they left off via shared state.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>📋 Recent Targets</h3>
+              <div id="launch-recent-targets" style="max-height:200px;overflow-y:auto;">
+                <p class="muted">No previous targets.</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -8127,6 +8434,210 @@ button:hover { background:#1d4ed8; }
 <script>
 console.log('[DEBUG] Script loading started');
 
+// ═══════════════════════════════════════════════════════════
+//  TOAST NOTIFICATION SYSTEM
+// ═══════════════════════════════════════════════════════════
+const TOAST_ICONS = { success:'✅', error:'❌', warning:'⚠️', info:'ℹ️' };
+function showToast(message, type = 'info', duration = 4000) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  const title = { success:'Success', error:'Error', warning:'Warning', info:'Info' }[type] || 'Info';
+  toast.innerHTML = `
+    <span class="toast-icon">${TOAST_ICONS[type] || 'ℹ️'}</span>
+    <div class="toast-body">
+      <div class="toast-title">${title}</div>
+      <div class="toast-msg">${escapeHtml ? escapeHtml(message) : message}</div>
+    </div>
+    <button onclick="this.closest('.toast').remove()" style="background:none;border:none;color:#64748b;cursor:pointer;padding:0;margin:0;font-size:16px;margin-left:8px;align-self:flex-start;">✕</button>`;
+  container.appendChild(toast);
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => toast.classList.add('show'));
+  });
+  if (duration > 0) {
+    setTimeout(() => {
+      toast.classList.replace('show','hide');
+      toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+    }, duration);
+  }
+  return toast;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  COPY TO CLIPBOARD
+// ═══════════════════════════════════════════════════════════
+function copyToClipboard(text, label) {
+  navigator.clipboard.writeText(text).then(() => {
+    showToast(`Copied ${label || text} to clipboard`, 'success', 2000);
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    showToast(`Copied ${label || text} to clipboard`, 'success', 2000);
+  });
+}
+
+function makeCopyBtn(text, label) {
+  return `<button class="copy-btn" onclick="event.stopPropagation();copyToClipboard(${JSON.stringify(text)},${JSON.stringify(label||text)})" title="Copy">📋 Copy</button>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  KEYBOARD SHORTCUTS
+// ═══════════════════════════════════════════════════════════
+function showKbd() { document.getElementById('kbd-overlay').classList.add('show'); }
+function closeKbd() { document.getElementById('kbd-overlay').classList.remove('show'); }
+function openSearch() {
+  document.getElementById('search-overlay').classList.add('show');
+  setTimeout(() => document.getElementById('global-search-input').focus(), 50);
+}
+function closeSearch() {
+  document.getElementById('search-overlay').classList.remove('show');
+  document.getElementById('global-search-input').value = '';
+  document.getElementById('search-results').innerHTML = '<div class="search-empty">Start typing to search…</div>';
+}
+
+let kbdSeq = '';
+document.addEventListener('keydown', (e) => {
+  const tag = document.activeElement?.tagName;
+  const inInput = ['INPUT','TEXTAREA','SELECT'].includes(tag);
+  if (e.key === 'Escape') {
+    closeKbd(); closeSearch();
+    const modal = document.getElementById('detail-overlay');
+    if (modal?.classList.contains('show')) closeDetailModal?.();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault(); openSearch(); return;
+  }
+  if (inInput) return;
+  if (e.key === '?') { showKbd(); return; }
+  if (e.key === 'r' || e.key === 'R') { fetchState?.(); showToast('Refreshing data…', 'info', 1500); return; }
+  // Two-key nav sequences (g+o, g+j, etc.)
+  kbdSeq += e.key.toLowerCase();
+  if (kbdSeq.length > 2) kbdSeq = kbdSeq.slice(-2);
+  const navMap = { 'go':'overview','gj':'jobs','gr':'reports','gl':'launch','gg':'logs','gq':'queue','gt':'targets' };
+  if (navMap[kbdSeq]) { setView?.(navMap[kbdSeq]); kbdSeq = ''; }
+});
+
+// ═══════════════════════════════════════════════════════════
+//  GLOBAL SEARCH
+// ═══════════════════════════════════════════════════════════
+let _searchState = null;
+function updateSearchState(data) { _searchState = data; }
+
+document.getElementById('global-search-input').addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  const container = document.getElementById('search-results');
+  if (!q) { container.innerHTML = '<div class="search-empty">Start typing to search…</div>'; return; }
+  if (!_searchState) { container.innerHTML = '<div class="search-empty">No data loaded yet. Try after first sync.</div>'; return; }
+  const results = [];
+  const targets = _searchState.targets || {};
+  for (const [domain, info] of Object.entries(targets)) {
+    if (domain.toLowerCase().includes(q)) {
+      results.push({ type:'domain', label:domain, sub:`${Object.keys(info.subdomains||{}).length} subdomains`, action:()=>{ closeSearch(); setView('reports'); } });
+    }
+    for (const sub of Object.keys(info.subdomains||{})) {
+      if (sub.toLowerCase().includes(q)) {
+        results.push({ type:'subdomain', label:sub, sub:domain, action:()=>{ closeSearch(); openSubdomainDetail?.(domain,sub); } });
+      }
+    }
+    if (results.length >= 40) break;
+  }
+  if (!results.length) { container.innerHTML = '<div class="search-empty">No results found.</div>'; return; }
+  container.innerHTML = results.map((r,i) => `
+    <div class="search-result-item" onclick="searchResults[${i}].action()">
+      <span class="search-result-type">${r.type}</span>
+      <span class="search-result-label">${escapeHtml(r.label)}</span>
+      <span class="search-result-sub">${escapeHtml(r.sub)}</span>
+    </div>`).join('');
+  window.searchResults = results;
+});
+
+// ═══════════════════════════════════════════════════════════
+//  CONNECTION INDICATOR
+// ═══════════════════════════════════════════════════════════
+function setConnStatus(state) {
+  const dot = document.getElementById('conn-dot');
+  const txt = document.getElementById('conn-status');
+  if (!dot || !txt) return;
+  dot.className = state === 'online' ? '' : state === 'syncing' ? 'syncing' : 'offline';
+  txt.textContent = state === 'online' ? 'Connected' : state === 'syncing' ? 'Syncing…' : 'Offline';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  NAV BADGE UPDATER
+// ═══════════════════════════════════════════════════════════
+function updateNavBadges(data) {
+  const jobs = (data.running_jobs || []).filter(j => j.status !== 'queued');
+  const queued = data.queued_jobs || [];
+  const targets = Object.keys(data.targets || {});
+
+  // Count critical/high findings
+  let critCount = 0;
+  for (const info of Object.values(data.targets || {})) {
+    for (const sub of Object.values(info.subdomains || {})) {
+      for (const f of (sub.nuclei || [])) {
+        const sev = (f.info?.severity || f.severity || '').toUpperCase();
+        if (sev === 'CRITICAL' || sev === 'HIGH') critCount++;
+      }
+    }
+  }
+
+  function setBadge(id, count, hideZero = true) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = count;
+    el.classList.toggle('badge-zero', hideZero && count === 0);
+  }
+  setBadge('badge-jobs', jobs.length);
+  setBadge('badge-queue', queued.length);
+  setBadge('badge-targets', targets.length, false);
+  setBadge('badge-critical', critCount);
+
+  // Critical banner
+  const banner = document.getElementById('critical-banner');
+  const bannerText = document.getElementById('critical-banner-text');
+  if (banner && critCount > 0 && !banner.dataset.dismissed) {
+    bannerText.textContent = `${critCount} critical/high severity finding${critCount>1?'s':''} detected across your targets.`;
+    banner.classList.add('show');
+  } else if (banner && critCount === 0) {
+    banner.classList.remove('show');
+  }
+  document.getElementById('critical-banner').addEventListener('click', (e) => {
+    if (e.target.classList.contains('banner-close') || e.target.closest('.banner-close')) {
+      banner.dataset.dismissed = '1';
+    }
+  }, { once: false });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  REMEMBER LAST SCAN SETTINGS
+// ═══════════════════════════════════════════════════════════
+const SCAN_PREFS_KEY = 'subscraper_scan_prefs';
+function saveScanPrefs() {
+  const wl = document.getElementById('launch-wordlist');
+  const iv = document.getElementById('launch-interval');
+  const sk = document.getElementById('launch-skip-nikto');
+  if (!wl) return;
+  localStorage.setItem(SCAN_PREFS_KEY, JSON.stringify({
+    wordlist: wl.value, interval: iv?.value || '', skip_nikto: sk?.checked || false
+  }));
+}
+function restoreScanPrefs() {
+  try {
+    const prefs = JSON.parse(localStorage.getItem(SCAN_PREFS_KEY) || 'null');
+    if (!prefs) return;
+    const wl = document.getElementById('launch-wordlist');
+    const iv = document.getElementById('launch-interval');
+    const sk = document.getElementById('launch-skip-nikto');
+    if (wl && prefs.wordlist) wl.value = prefs.wordlist;
+    if (iv && prefs.interval) iv.value = prefs.interval;
+    if (sk) sk.checked = !!prefs.skip_nikto;
+  } catch {}
+}
+
 // Load current user info
 async function loadUserInfo() {
   try {
@@ -8804,10 +9315,16 @@ function renderJobs(jobs) {
   const completedJobs = running.filter(job => job.completed_at);
   
   // Update the stat to show active + completed
-  statActive.textContent = `${activeJobs.length}${completedJobs.length > 0 ? ` (+ ${completedJobs.length} completed)` : ''}`;
+  statActive.textContent = `${activeJobs.length}${completedJobs.length > 0 ? ` (+${completedJobs.length})` : ''}`;
+  statActive.closest('.stat-card')?.classList.toggle('has-activity', activeJobs.length > 0);
   
   if (!running.length) {
-    jobsList.innerHTML = '<div class="section-placeholder">No active jobs.</div>';
+    jobsList.innerHTML = `<div class="empty-state">
+      <span class="empty-icon">⚡</span>
+      <div class="empty-title">No active jobs</div>
+      <div class="empty-desc">Launch a scan to start enumerating subdomains and detecting vulnerabilities.</div>
+      <button class="btn" onclick="setView('launch')">＋ New Scan</button>
+    </div>`;
     const pagerEl = document.getElementById('jobs-pagination');
     if (pagerEl) pagerEl.innerHTML = '';
     return;
@@ -8838,11 +9355,12 @@ function renderJobs(jobs) {
     const steps = job.steps || {};
     const stepsHtml = Object.keys(steps).map(step => renderJobStep(step, steps[step], job.domain)).join('');
     const logsHtml = renderLogEntries(job.logs || []);
+    const cardClass = `job-card status-${(job.status||'').replace(/_/g,'-')}`;
     return `
-      <div class="job-card">
+      <div class="${cardClass}">
         <div class="job-summary">
           <div>
-            <div>${escapeHtml(job.domain || '')}</div>
+            <div style="font-weight:700;font-size:15px;">${escapeHtml(job.domain || '')}${makeCopyBtn(job.domain||'','domain')}</div>
             <div class="muted">Started ${fmtTime(job.started)}</div>
             ${job.completed_at ? `<div class="muted">Completed ${fmtTime(job.completed_at)}</div>` : ''}
           </div>
@@ -8854,7 +9372,7 @@ function renderJobs(jobs) {
         ${renderProgress(progress, job.status)}
         <div class="job-meta">
           <span><strong>Wordlist:</strong> ${escapeHtml(job.wordlist || 'default')}</span>
-          <span><strong>Interval:</strong> ${escapeHtml(job.interval || 0)}s</span>
+          <span><strong>Interval:</strong> ${escapeHtml(String(job.interval || 0))}s</span>
           <span><strong>Nikto:</strong> ${job.skip_nikto ? 'Skipped' : 'Enabled'}</span>
         </div>
         <div class="job-message">${escapeHtml(job.message || '')}</div>
@@ -8927,7 +9445,7 @@ function renderQueue(queue) {
   const items = Array.isArray(queue) ? queue : [];
   statQueued.textContent = items.length;
   if (!items.length) {
-    queueList.innerHTML = '<div class="section-placeholder">Queue empty.</div>';
+    queueList.innerHTML = `<div class="empty-state"><span class="empty-icon">🕐</span><div class="empty-title">Queue is empty</div><div class="empty-desc">Queued jobs appear here when all worker slots are occupied.</div></div>`;
     const pagerEl = document.getElementById('queue-pagination');
     if (pagerEl) pagerEl.innerHTML = '';
     return;
@@ -9018,7 +9536,7 @@ function renderOverviewTargets(targets) {
   const entries = Object.entries(targets || {});
   if (!entries.length || !overviewTargetsList) {
     if (overviewTargetsList) {
-      overviewTargetsList.innerHTML = '<div class="section-placeholder">No reconnaissance data yet.</div>';
+      overviewTargetsList.innerHTML = `<div class="empty-state"><span class="empty-icon">🎯</span><div class="empty-title">No targets yet</div><div class="empty-desc">Launch your first scan to begin collecting subdomain intelligence.</div><button class="btn" onclick="setView('launch')">＋ Launch Scan</button></div>`;
     }
     return;
   }
@@ -9127,12 +9645,30 @@ function renderOverviewTargets(targets) {
   }
 }
 
+function renderLaunchRecentTargets(targets) {
+  const el = document.getElementById('launch-recent-targets');
+  if (!el) return;
+  const entries = Object.entries(targets || {}).slice(0, 8);
+  if (!entries.length) { el.innerHTML = '<p class="muted">No previous targets.</p>'; return; }
+  el.innerHTML = entries.map(([domain, info]) => {
+    const subCount = Object.keys(info.subdomains || {}).length;
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1e293b;">
+      <span style="font-size:13px;font-weight:600;">${escapeHtml(domain)}</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span class="muted" style="font-size:12px;">${subCount} subs</span>
+        <button class="btn small" style="margin:0;padding:4px 10px;font-size:12px;" onclick="document.getElementById('launch-domain').value='${escapeHtml(domain)}';setView('launch')">Re-scan</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
 function renderTargets(targets) {
   latestTargetsData = targets || {};
   const entries = Object.entries(targets || {});
   statTargets.textContent = entries.length;
+  renderLaunchRecentTargets(targets);
   if (!entries.length) {
-    targetsList.innerHTML = '<div class="section-placeholder">No reconnaissance data yet.</div>';
+    targetsList.innerHTML = `<div class="empty-state"><span class="empty-icon">🎯</span><div class="empty-title">No targets yet</div><div class="empty-desc">Start a scan to track domains and their discovered subdomains.</div><button class="btn" onclick="setView('launch')">＋ New Scan</button></div>`;
     statSubs.textContent = 0;
     return;
   }
@@ -10031,8 +10567,12 @@ function buildDetailHtml(domain, sub, info, history) {
       <h4>Metadata</h4>
       <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px;">
         <div>
+          <strong>Subdomain:</strong><br>
+          <span class="badge">${escapeHtml(sub)}</span>${makeCopyBtn(sub,'subdomain')}
+        </div>
+        <div>
           <strong>Parent Domain:</strong><br>
-          <span class="badge">${escapeHtml(domain)}</span>
+          <span class="badge">${escapeHtml(domain)}</span>${makeCopyBtn(domain,'domain')}
         </div>
         <div>
           <strong>Discovery Sources:</strong><br>
@@ -10048,7 +10588,7 @@ function buildDetailHtml(domain, sub, info, history) {
       <h4>HTTP Response</h4>
       ${Object.keys(httpx).length ? `
         <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px;">
-          <div><strong>URL:</strong><br>${escapeHtml(httpx.url || '—')}</div>
+          <div><strong>URL:</strong><br>${httpx.url ? `<a href="${escapeHtml(httpx.url)}" target="_blank" rel="noopener">${escapeHtml(httpx.url)}</a>${makeCopyBtn(httpx.url,'URL')}` : '—'}</div>
           <div><strong>Status Code:</strong><br>${httpx.status_code || '—'}</div>
           <div><strong>Title:</strong><br>${escapeHtml(httpx.title || '—')}</div>
           <div><strong>Server:</strong><br>${escapeHtml(httpx.webserver || httpx.server || '—')}</div>
@@ -10459,7 +10999,7 @@ function renderReports(targets) {
   
   const entries = Object.entries(latestTargetsData);
   if (!entries.length) {
-    reportsBody.innerHTML = '<div class="section-placeholder">No reconnaissance data yet.</div>';
+    reportsBody.innerHTML = `<div class="empty-state"><span class="empty-icon">📋</span><div class="empty-title">No reports yet</div><div class="empty-desc">Completed scans will appear here with vulnerability findings and HTTP data.</div><button class="btn" onclick="setView('launch')">＋ Launch Scan</button></div>`;
     selectedReportDomain = null;
     return;
   }
@@ -10538,16 +11078,17 @@ function renderReports(targets) {
       completedAtText = `<span style="font-size: 11px; color: #94a3b8; display: block; margin-top: 4px;">Completed: ${escapeHtml(timeStr)}</span>`;
     }
     
+    const critClass = severity === 'CRITICAL' ? 'has-critical' : severity === 'HIGH' ? 'has-high' : '';
     return `
-      <div class="report-nav-card" data-report-domain="${escapeHtml(domain)}">
+      <div class="report-nav-card ${critClass}" data-report-domain="${escapeHtml(domain)}">
         <div class="domain-row">
-          <div class="domain">${escapeHtml(domain)}</div>
+          <div class="domain">${escapeHtml(domain)}${makeCopyBtn(domain,'domain')}</div>
           ${severityFlag}
         </div>
         <div class="meta">
-          <span>Subs <span class="stat">${stats.subdomains}</span></span>
-          <span>HTTP <span class="stat">${stats.http}</span></span>
-          <span>Findings <span class="stat">${stats.nuclei + stats.nikto}</span></span>
+          <span>🔍 <span class="stat">${stats.subdomains}</span> subs</span>
+          <span>🌐 <span class="stat">${stats.http}</span> http</span>
+          <span>⚠️ <span class="stat">${stats.nuclei + stats.nikto}</span> findings</span>
         </div>
         ${badge}
         ${completedAtText}
@@ -10601,10 +11142,19 @@ function renderReports(targets) {
   
   reportsBody.innerHTML = `
     <div class="export-actions">
-      <a class="btn" href="/api/export/state" target="_blank">Download JSON</a>
-      <a class="btn secondary" href="/api/export/csv" target="_blank">Download CSV</a>
-      <button class="btn" id="export-subdomains-txt">Export Subdomains (TXT)</button>
-      <button class="btn secondary" id="export-subdomains-csv">Export Subdomains (CSV)</button>
+      <a class="btn" href="/api/export/state" target="_blank">⬇ Download JSON</a>
+      <a class="btn secondary" href="/api/export/csv" target="_blank">⬇ Download CSV</a>
+      <button class="btn" id="export-subdomains-txt">⬇ Export Subdomains (TXT)</button>
+      <button class="btn secondary" id="export-subdomains-csv">⬇ Export Subdomains (CSV)</button>
+    </div>
+    <div class="severity-legend">
+      <strong style="margin-right:4px;color:#94a3b8;font-size:11px;">SEVERITY:</strong>
+      <span class="severity-legend-item"><span class="severity-flag CRITICAL">CRITICAL</span></span>
+      <span class="severity-legend-item"><span class="severity-flag HIGH">HIGH</span></span>
+      <span class="severity-legend-item"><span class="severity-flag MEDIUM">MEDIUM</span></span>
+      <span class="severity-legend-item"><span class="severity-flag LOW">LOW</span></span>
+      <span class="severity-legend-item"><span class="severity-flag INFO">INFO</span></span>
+      <span style="margin-left:auto;font-size:11px;color:#64748b;">Keyboard: <kbd>?</kbd> for shortcuts · <kbd>Ctrl+K</kbd> to search</span>
     </div>
     ${filterControls}
     <div class="reports-layout">
@@ -10714,7 +11264,7 @@ function renderMonitors(monitors) {
   if (!monitorsList) return;
   monitorsData = Array.isArray(monitors) ? monitors : [];
   if (!monitorsData.length) {
-    monitorsList.innerHTML = '<div class="section-placeholder">No monitors configured yet.</div>';
+    monitorsList.innerHTML = `<div class="empty-state"><span class="empty-icon">👁</span><div class="empty-title">No monitors yet</div><div class="empty-desc">Set up a monitor to automatically trigger scans when new domains are added to a target list.</div></div>`;
     return;
   }
   const cards = monitorsData.map(monitor => {
@@ -11379,6 +11929,7 @@ async function handleJobControl(action, domain, button) {
   if (!domain || !button) return;
   const original = button.textContent;
   button.disabled = true;
+  button.classList.add('loading');
   button.textContent = action === 'pause' ? 'Pausing…' : 'Resuming…';
   try {
     const resp = await fetch(`/api/jobs/${action}`, {
@@ -11387,17 +11938,18 @@ async function handleJobControl(action, domain, button) {
       body: JSON.stringify({ domain }),
     });
     const data = await resp.json();
-    button.textContent = data.message || original;
     if (data.success) {
+      showToast(data.message || `Job ${action}d`, 'success');
       fetchState();
+    } else {
+      showToast(data.message || 'Action failed', 'error');
     }
   } catch (err) {
-    button.textContent = err.message || 'Failed';
+    showToast(err.message || 'Failed', 'error');
   } finally {
-    setTimeout(() => {
-      button.textContent = original;
-      button.disabled = false;
-    }, 2000);
+    button.classList.remove('loading');
+    button.textContent = original;
+    button.disabled = false;
   }
 }
 
@@ -11450,26 +12002,18 @@ jobsList.addEventListener('click', (event) => {
 const resumeAllBtn = document.getElementById('resume-all-btn');
 if (resumeAllBtn) {
   resumeAllBtn.addEventListener('click', async () => {
-    const original = resumeAllBtn.textContent;
     resumeAllBtn.disabled = true;
-    resumeAllBtn.textContent = 'Resuming...';
+    resumeAllBtn.classList.add('loading');
     try {
-      const resp = await fetch('/api/jobs/resume-all', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const resp = await fetch('/api/jobs/resume-all', { method:'POST', headers:{'Content-Type':'application/json'} });
       const data = await resp.json();
-      resumeAllBtn.textContent = data.message || 'Done';
-      if (data.success) {
-        fetchState();
-      }
+      showToast(data.message || 'All jobs resumed', data.success ? 'success' : 'error');
+      if (data.success) fetchState();
     } catch (err) {
-      resumeAllBtn.textContent = err.message || 'Failed';
+      showToast(err.message || 'Failed', 'error');
     } finally {
-      setTimeout(() => {
-        resumeAllBtn.textContent = original;
-        resumeAllBtn.disabled = false;
-      }, 2000);
+      resumeAllBtn.classList.remove('loading');
+      resumeAllBtn.disabled = false;
     }
   });
 }
@@ -11478,29 +12022,19 @@ if (resumeAllBtn) {
 const cancelAllBtn = document.getElementById('cancel-all-btn');
 if (cancelAllBtn) {
   cancelAllBtn.addEventListener('click', async () => {
-    if (!confirm('Cancel all running jobs? They will be paused and can be resumed later.')) {
-      return;
-    }
-    const original = cancelAllBtn.textContent;
+    if (!confirm('Cancel all running jobs? They will be paused and can be resumed later.')) return;
     cancelAllBtn.disabled = true;
-    cancelAllBtn.textContent = 'Cancelling...';
+    cancelAllBtn.classList.add('loading');
     try {
-      const resp = await fetch('/api/jobs/cancel-all', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const resp = await fetch('/api/jobs/cancel-all', { method:'POST', headers:{'Content-Type':'application/json'} });
       const data = await resp.json();
-      cancelAllBtn.textContent = data.message || 'Done';
-      if (data.success) {
-        fetchState();
-      }
+      showToast(data.message || 'All jobs cancelled', data.success ? 'warning' : 'error');
+      if (data.success) fetchState();
     } catch (err) {
-      cancelAllBtn.textContent = err.message || 'Failed';
+      showToast(err.message || 'Failed', 'error');
     } finally {
-      setTimeout(() => {
-        cancelAllBtn.textContent = original;
-        cancelAllBtn.disabled = false;
-      }, 2000);
+      cancelAllBtn.classList.remove('loading');
+      cancelAllBtn.disabled = false;
     }
   });
 }
@@ -11681,13 +12215,14 @@ function renderSettings(config, tools) {
 let lastStateETag = null;
 
 async function fetchState() {
+  setConnStatus('syncing');
   try {
     // Build request with ETag support for caching
     const headers = {};
     if (lastStateETag) {
       headers['If-None-Match'] = lastStateETag;
     }
-    
+
     const resp = await fetch('/api/state', { headers });
     
     // Check for 304 Not Modified - no need to update
@@ -11721,20 +12256,29 @@ async function fetchState() {
     renderReports(data.targets || {});
     renderMonitors(data.monitors || []);
     renderGallery(data.targets || {});
-    
+
+    // Update nav badges and critical banner
+    updateNavBadges(data);
+    // Feed global search state
+    updateSearchState(data);
+    // Update connection indicator
+    setConnStatus('online');
+
     // Fetch and render system resources
     await fetchSystemResources();
-    
+
     // Restore collapsible states after rendering
     restoreAllCollapsibleStates();
-    
+
     // Update logs view if visible
     const logsSection = document.querySelector('[data-view="logs"]');
     if (logsSection && logsSection.classList.contains('active')) {
       await updateLogsView();
     }
   } catch (err) {
-    targetsList.innerHTML = `<div class="section-placeholder">${escapeHtml(err.message)}</div>`;
+    setConnStatus('offline');
+    targetsList.innerHTML = `<div class="empty-state"><span class="empty-icon">📡</span><div class="empty-title">Connection Lost</div><div class="empty-desc">${escapeHtml(err.message)}</div><button class="btn" onclick="fetchState()">Retry</button></div>`;
+    showToast(err.message, 'error');
   }
 }
 
@@ -11760,16 +12304,23 @@ detailOverlay.addEventListener('click', (event) => {
   if (event.target === detailOverlay) closeDetailModal();
 });
 
+// Restore last scan preferences on load
+restoreScanPrefs();
+
 launchForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  const submitBtn = launchForm.querySelector('button[type="submit"]');
   const payload = {
     domain: event.target.domain.value,
     wordlist: launchWordlist.value,
     interval: launchInterval.value,
     skip_nikto: launchSkipNikto.checked,
   };
-  launchStatus.textContent = 'Dispatching...';
-  launchStatus.className = 'status';
+  // Save preferences
+  saveScanPrefs();
+  // Loading state
+  if (submitBtn) { submitBtn.classList.add('loading'); submitBtn.disabled = true; }
+  launchStatus.textContent = '';
   try {
     const resp = await fetch('/api/run', {
       method: 'POST',
@@ -11777,16 +12328,20 @@ launchForm.addEventListener('submit', async (event) => {
       body: JSON.stringify(payload),
     });
     const data = await resp.json();
-    launchStatus.textContent = data.message || 'Done';
-    launchStatus.className = 'status ' + (data.success ? 'success' : 'error');
     if (data.success) {
+      showToast(data.message || 'Scan launched!', 'success');
       event.target.reset();
+      // Restore wordlist/interval (domain was the only required field to clear)
+      restoreScanPrefs();
       launchFormDirty = false;
       fetchState();
+    } else {
+      showToast(data.message || 'Failed to start scan', 'error');
     }
   } catch (err) {
-    launchStatus.textContent = err.message;
-    launchStatus.className = 'status error';
+    showToast(err.message, 'error');
+  } finally {
+    if (submitBtn) { submitBtn.classList.remove('loading'); submitBtn.disabled = false; }
   }
 });
 
@@ -11872,19 +12427,22 @@ if (settingsForm) {
       const data = await resp.json();
       console.log('Response data:', data);
       
-      settingsStatus.textContent = data.message || 'Saved';
-      settingsStatus.className = 'status ' + (data.success ? 'success' : 'error');
       if (data.success) {
+        settingsStatus.textContent = '';
         settingsFormDirty = false;
+        showToast(data.message || 'Settings saved', 'success');
         fetchState();
+      } else {
+        settingsStatus.textContent = data.message || 'Failed to save';
+        settingsStatus.className = 'status error';
+        showToast(data.message || 'Failed to save settings', 'error');
       }
     } catch (err) {
       console.error('Settings form submission error:', err);
+      showToast('Error: ' + err.message, 'error');
       if (settingsStatus) {
         settingsStatus.textContent = 'Error: ' + err.message;
         settingsStatus.className = 'status error';
-      } else {
-        alert('Error saving settings: ' + err.message);
       }
     }
   };
@@ -12455,33 +13013,34 @@ if (galleryTargetSelect) {
       
       const screenshots = data.screenshots || [];
       if (screenshots.length === 0) {
-        galleryGrid.innerHTML = '<div class="section-placeholder">No screenshots available for this target.</div>';
+        galleryGrid.innerHTML = `<div class="empty-state"><span class="empty-icon">🖼</span><div class="empty-title">No screenshots</div><div class="empty-desc">Screenshots are captured by gowitness during HTTP probing. Make sure gowitness is installed.</div></div>`;
         return;
       }
-      
+
       const html = screenshots.map(shot => {
         const statusClass = shot.status_code >= 200 && shot.status_code < 300 ? 'status-2xx' :
                             shot.status_code >= 300 && shot.status_code < 400 ? 'status-3xx' :
                             shot.status_code >= 400 && shot.status_code < 500 ? 'status-4xx' : 'status-5xx';
         const statusBadge = shot.status_code ? `<span class="status-badge ${statusClass}">${shot.status_code}</span>` : '';
-        
+
         return `
           <div class="gallery-card">
-            <img class="gallery-image" src="/screenshots/${escapeHtml(shot.path)}" 
-                 alt="${escapeHtml(shot.subdomain)}" 
+            <img class="gallery-image" loading="lazy" src="/screenshots/${escapeHtml(shot.path)}"
+                 alt="${escapeHtml(shot.subdomain)}"
                  onclick="window.open('/screenshots/${escapeHtml(shot.path)}', '_blank')" />
             <div class="gallery-info">
-              <div class="gallery-subdomain">${escapeHtml(shot.subdomain)}</div>
+              <div class="gallery-subdomain">${escapeHtml(shot.subdomain)}${makeCopyBtn(shot.subdomain,'subdomain')}</div>
               <a href="${escapeHtml(shot.url)}" target="_blank" class="gallery-url">${escapeHtml(shot.url)}</a>
               <div class="gallery-meta">
                 ${statusBadge}
                 ${shot.title ? `<span class="badge">${escapeHtml(shot.title)}</span>` : ''}
+                ${makeCopyBtn(shot.url,'URL')}
               </div>
             </div>
           </div>
         `;
       }).join('');
-      
+
       galleryGrid.innerHTML = html;
     } catch (err) {
       galleryGrid.innerHTML = `<div class="section-placeholder">Error: ${escapeHtml(err.message)}</div>`;
