@@ -8440,6 +8440,25 @@ button.loading::after, .btn.loading::after {
 console.log('[DEBUG] Script loading started');
 
 // ═══════════════════════════════════════════════════════════
+//  AUTH-AWARE FETCH HELPER
+// ═══════════════════════════════════════════════════════════
+async function apiFetch(url, options = {}) {
+  const resp = await fetch(url, options);
+  // Redirected to login (session expired)
+  if (resp.redirected && resp.url.includes('/login')) {
+    window.location.href = '/login';
+    throw new Error('Session expired. Redirecting to login…');
+  }
+  const ct = resp.headers.get('content-type') || '';
+  if (!ct.includes('application/json') && !ct.includes('text/plain') && !ct.includes('application/octet-stream')) {
+    // Likely got the login HTML page instead of API response
+    window.location.href = '/login';
+    throw new Error('Session expired. Redirecting to login…');
+  }
+  return resp;
+}
+
+// ═══════════════════════════════════════════════════════════
 //  TOAST NOTIFICATION SYSTEM
 // ═══════════════════════════════════════════════════════════
 const TOAST_ICONS = { success:'✅', error:'❌', warning:'⚠️', info:'ℹ️' };
@@ -8916,7 +8935,7 @@ function escapeHtml(value) {
 // User management functions
 async function loadUsers() {
   try {
-    const resp = await fetch('/api/users');
+    const resp = await apiFetch('/api/users');
     const data = await resp.json();
     if (data.success) {
       displayUsers(data.users);
@@ -8980,7 +8999,7 @@ async function editUser(userId, username, isAdmin) {
   }
   
   try {
-    const resp = await fetch('/api/users/edit', {
+    const resp = await apiFetch('/api/users/edit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -9005,7 +9024,7 @@ async function deleteUser(userId, username) {
   }
   
   try {
-    const resp = await fetch('/api/users/delete', {
+    const resp = await apiFetch('/api/users/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId })
@@ -9051,7 +9070,7 @@ if (createUserForm) {
     }
     
     try {
-      const resp = await fetch('/api/users/create', {
+      const resp = await apiFetch('/api/users/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password, is_admin: isAdmin })
@@ -10515,7 +10534,7 @@ function formatNumber(num) {
 
 async function fetchSystemResources() {
   try {
-    const resp = await fetch('/api/system-resources');
+    const resp = await apiFetch('/api/system-resources');
     if (!resp.ok) throw new Error('Failed to fetch system resources');
     const data = await resp.json();
     renderSystemResources(data);
@@ -10543,7 +10562,7 @@ async function openSubdomainDetail(domain, sub) {
 async function fetchHistory(domain) {
   if (historyCache[domain]) return historyCache[domain];
   try {
-    const resp = await fetch(`/api/history?domain=${encodeURIComponent(domain)}`);
+    const resp = await apiFetch(`/api/history?domain=${encodeURIComponent(domain)}`);
     if (!resp.ok) throw new Error('Failed to fetch history');
     const data = await resp.json();
     historyCache[domain] = data.events || [];
@@ -11331,7 +11350,7 @@ async function deleteMonitor(id, button) {
     button.textContent = 'Removing…';
   }
   try {
-    const resp = await fetch('/api/monitors/delete', {
+    const resp = await apiFetch('/api/monitors/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id }),
@@ -11442,7 +11461,7 @@ async function renderReportDetail(domain) {
   // Fetch full domain data from API (not truncated summary)
   let info;
   try {
-    const resp = await fetch(`/api/domain/${encodeURIComponent(domain)}`);
+    const resp = await apiFetch(`/api/domain/${encodeURIComponent(domain)}`);
     if (!resp.ok) throw new Error('Failed to load domain data');
     const data = await resp.json();
     if (!data.success) throw new Error(data.message || 'Failed to load data');
@@ -11870,7 +11889,7 @@ async function fetchCommandHistory(domain) {
     return commandHistoryCache[domain];
   }
   try {
-    const resp = await fetch(`/api/history/commands?domain=${encodeURIComponent(domain)}&limit=400`);
+    const resp = await apiFetch(`/api/history/commands?domain=${encodeURIComponent(domain)}&limit=400`);
     if (!resp.ok) throw new Error('Failed to fetch commands');
     const data = await resp.json();
     const commands = Array.isArray(data.commands) ? data.commands : [];
@@ -11910,7 +11929,7 @@ async function handleResumeTarget(domain, button) {
   button.disabled = true;
   button.textContent = 'Resuming…';
   try {
-    const resp = await fetch('/api/targets/resume', {
+    const resp = await apiFetch('/api/targets/resume', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ domain }),
@@ -11937,7 +11956,7 @@ async function handleJobControl(action, domain, button) {
   button.classList.add('loading');
   button.textContent = action === 'pause' ? 'Pausing…' : 'Resuming…';
   try {
-    const resp = await fetch(`/api/jobs/${action}`, {
+    const resp = await apiFetch(`/api/jobs/${action}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ domain }),
@@ -12010,7 +12029,7 @@ if (resumeAllBtn) {
     resumeAllBtn.disabled = true;
     resumeAllBtn.classList.add('loading');
     try {
-      const resp = await fetch('/api/jobs/resume-all', { method:'POST', headers:{'Content-Type':'application/json'} });
+      const resp = await apiFetch('/api/jobs/resume-all', { method:'POST', headers:{'Content-Type':'application/json'} });
       const data = await resp.json();
       showToast(data.message || 'All jobs resumed', data.success ? 'success' : 'error');
       if (data.success) fetchState();
@@ -12031,7 +12050,7 @@ if (cancelAllBtn) {
     cancelAllBtn.disabled = true;
     cancelAllBtn.classList.add('loading');
     try {
-      const resp = await fetch('/api/jobs/cancel-all', { method:'POST', headers:{'Content-Type':'application/json'} });
+      const resp = await apiFetch('/api/jobs/cancel-all', { method:'POST', headers:{'Content-Type':'application/json'} });
       const data = await resp.json();
       showToast(data.message || 'All jobs cancelled', data.success ? 'warning' : 'error');
       if (data.success) fetchState();
@@ -12052,7 +12071,7 @@ async function handleSkipStep(domain, step, btn) {
   btn.disabled = true;
   btn.textContent = 'Skipping...';
   try {
-    const resp = await fetch('/api/jobs/skip-step', {
+    const resp = await apiFetch('/api/jobs/skip-step', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ domain, step })
@@ -12229,23 +12248,36 @@ async function fetchState() {
     }
 
     const resp = await fetch('/api/state', { headers });
-    
+
+    // Redirected to login page → session expired
+    if (resp.redirected && resp.url.includes('/login')) {
+      window.location.href = '/login';
+      return;
+    }
+
     // Check for 304 Not Modified - no need to update
     if (resp.status === 304) {
-      // Data unchanged, just update timestamp
+      setConnStatus('online');
       const now = new Date().toISOString();
       document.getElementById('last-updated').textContent = 'Last updated: ' + now + ' (cached)';
       return;
     }
-    
-    if (!resp.ok) throw new Error('Failed to fetch state');
-    
+
+    // Auth redirect returned as 200 HTML (some servers don't use 302)
+    const contentType = resp.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      window.location.href = '/login';
+      return;
+    }
+
+    if (!resp.ok) throw new Error('Failed to fetch state: ' + resp.status);
+
     // Store new ETag for next request
     const etag = resp.headers.get('ETag');
     if (etag) {
       lastStateETag = etag;
     }
-    
+
     const data = await resp.json();
     latestConfig = data.config || {};
     latestRunningJobs = data.running_jobs || [];
@@ -12327,7 +12359,7 @@ launchForm.addEventListener('submit', async (event) => {
   if (submitBtn) { submitBtn.classList.add('loading'); submitBtn.disabled = true; }
   launchStatus.textContent = '';
   try {
-    const resp = await fetch('/api/run', {
+    const resp = await apiFetch('/api/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -12422,7 +12454,7 @@ if (settingsForm) {
       
       console.log('Sending settings payload:', payload);
       
-      const resp = await fetch('/api/settings', {
+      const resp = await apiFetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -12499,7 +12531,7 @@ const apiKeysStatus = document.getElementById('api-keys-status');
 // Load existing API keys when settings tab is viewed
 async function loadApiKeys() {
   try {
-    const resp = await fetch('/api/api-keys');
+    const resp = await apiFetch('/api/api-keys');
     if (!resp.ok) throw new Error('Failed to load API keys');
     const data = await resp.json();
     
@@ -12550,7 +12582,7 @@ if (apiKeysForm) {
     });
     
     try {
-      const resp = await fetch('/api/api-keys', {
+      const resp = await apiFetch('/api/api-keys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amass: amassKeys, subfinder: subfinderKeys })
@@ -12589,7 +12621,7 @@ settingsTabs.forEach(tab => {
 // Backup functionality
 async function loadBackups() {
   try {
-    const resp = await fetch('/api/backups');
+    const resp = await apiFetch('/api/backups');
     if (!resp.ok) throw new Error('Failed to load backups');
     const data = await resp.json();
     renderBackupsList(data.backups || []);
@@ -12642,7 +12674,7 @@ async function createBackup() {
       payload.name = backupNameInput.value.trim();
     }
     
-    const resp = await fetch('/api/backup/create', {
+    const resp = await apiFetch('/api/backup/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -12674,7 +12706,7 @@ async function restoreBackup(filename) {
   }
   
   try {
-    const resp = await fetch('/api/backup/restore', {
+    const resp = await apiFetch('/api/backup/restore', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filename }),
@@ -12698,7 +12730,7 @@ async function deleteBackup(filename) {
   }
   
   try {
-    const resp = await fetch('/api/backup/delete', {
+    const resp = await apiFetch('/api/backup/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filename }),
@@ -12742,7 +12774,7 @@ if (monitorForm) {
       monitorStatus.className = 'status';
     }
     try {
-      const resp = await fetch('/api/monitors', {
+      const resp = await apiFetch('/api/monitors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -12827,7 +12859,7 @@ async function fetchAllLogs() {
   const targets = Object.keys(latestTargetsData);
   for (const domain of targets) {
     try {
-      const resp = await fetch(`/api/history?domain=${encodeURIComponent(domain)}`);
+      const resp = await apiFetch(`/api/history?domain=${encodeURIComponent(domain)}`);
       if (resp.ok) {
         const data = await resp.json();
         const events = data.events || [];
@@ -13007,7 +13039,7 @@ if (galleryTargetSelect) {
     galleryGrid.innerHTML = '<div class="section-placeholder">Loading screenshots...</div>';
     
     try {
-      const resp = await fetch(`/api/gallery/${encodeURIComponent(domain)}`);
+      const resp = await apiFetch(`/api/gallery/${encodeURIComponent(domain)}`);
       if (!resp.ok) throw new Error('Failed to load gallery');
       const data = await resp.json();
       
@@ -13216,7 +13248,7 @@ window.addEventListener('hashchange', () => {
 
   async function loadDbTables() {
     try {
-      const resp = await fetch('/api/db/tables');
+      const resp = await apiFetch('/api/db/tables');
       const data = await resp.json();
       if (!data.success) { dbStatus.textContent = data.message || 'Failed to load tables.'; return; }
       const prevVal = dbTableSelect ? dbTableSelect.value : '';
@@ -13248,7 +13280,7 @@ window.addEventListener('hashchange', () => {
         sort_col: dbSortCol,
         sort_dir: dbSortDir,
       });
-      const resp = await fetch(`/api/db/table/${encodeURIComponent(dbCurrentTable)}?${params}`);
+      const resp = await apiFetch(`/api/db/table/${encodeURIComponent(dbCurrentTable)}?${params}`);
       const data = await resp.json();
       if (!data.success) { dbStatus.textContent = data.message || 'Failed to load table data.'; return; }
       dbColumns = data.columns || [];
@@ -14722,7 +14754,7 @@ function refreshPagination(table, state, pagerEl) {{
 
 async function loadDomainDetail() {{
   try {{
-    const resp = await fetch(`/api/domain/${{encodeURIComponent(domain)}}`);
+    const resp = await apiFetch(`/api/domain/${{encodeURIComponent(domain)}}`);
     if (!resp.ok) throw new Error('Failed to load domain data');
     const data = await resp.json();
     if (!data.success) throw new Error(data.message || 'Failed to load data');
@@ -15084,7 +15116,7 @@ function fmtTime(iso) {{
 
 async function loadSubdomainDetail() {{
   try {{
-    const resp = await fetch(`/api/subdomain/${{encodeURIComponent(domain)}}/${{encodeURIComponent(subdomain)}}`);
+    const resp = await apiFetch(`/api/subdomain/${{encodeURIComponent(domain)}}/${{encodeURIComponent(subdomain)}}`);
     if (!resp.ok) throw new Error('Failed to load subdomain data');
     const data = await resp.json();
     if (!data.success) throw new Error(data.message || 'Failed to load data');
@@ -15297,7 +15329,7 @@ function renderSubdomainDetail(info, history, endpoints, flags) {{
 
 async function markSubdomain(interesting) {{
   try {{
-    const resp = await fetch('/api/subdomain/mark', {{
+    const resp = await apiFetch('/api/subdomain/mark', {{
       method: 'POST',
       headers: {{ 'Content-Type': 'application/json' }},
       body: JSON.stringify({{ domain, subdomain, interesting }})
@@ -15319,7 +15351,7 @@ async function addComment() {{
   if (!comment) return;
   
   try {{
-    const resp = await fetch('/api/subdomain/comment', {{
+    const resp = await apiFetch('/api/subdomain/comment', {{
       method: 'POST',
       headers: {{ 'Content-Type': 'application/json' }},
       body: JSON.stringify({{ domain, subdomain, comment, action: 'add' }})
@@ -15340,7 +15372,7 @@ async function deleteComment(commentId) {{
   if (!confirm('Delete this comment?')) return;
   
   try {{
-    const resp = await fetch('/api/subdomain/comment', {{
+    const resp = await apiFetch('/api/subdomain/comment', {{
       method: 'POST',
       headers: {{ 'Content-Type': 'application/json' }},
       body: JSON.stringify({{ domain, subdomain, comment_id: commentId, action: 'delete' }})
@@ -15364,7 +15396,7 @@ async function runContentDiscovery(tool) {{
   statusDiv.textContent = `Running ${{tool}} for ${{subdomain}}...`;
   
   try {{
-    const resp = await fetch('/api/subdomain/run-tool', {{
+    const resp = await apiFetch('/api/subdomain/run-tool', {{
       method: 'POST',
       headers: {{ 'Content-Type': 'application/json' }},
       body: JSON.stringify({{ domain, subdomain, tool }})
@@ -15654,7 +15686,7 @@ document.getElementById('modal').addEventListener('click', (e) => {{
 
 async function loadGallery() {{
   try {{
-    const resp = await fetch(`/api/gallery/${{encodeURIComponent(domain)}}`);
+    const resp = await apiFetch(`/api/gallery/${{encodeURIComponent(domain)}}`);
     if (!resp.ok) throw new Error('Failed to load screenshots');
     const data = await resp.json();
     if (!data.success) throw new Error(data.message || 'Failed to load data');
@@ -15665,7 +15697,7 @@ async function loadGallery() {{
     
     // Load screenshots per page from config if available
     try {{
-      const configResp = await fetch('/api/settings');
+      const configResp = await apiFetch('/api/settings');
       if (configResp.ok) {{
         const configData = await configResp.json();
         screenshotsPerPage = configData.config?.screenshots_per_page || 20;
