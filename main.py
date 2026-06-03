@@ -6988,7 +6988,8 @@ a { color:#93c5fd; text-decoration:none; }
 code { background:#1e293b; padding:2px 4px; border-radius:4px; font-size:12px; }
 .muted { color:var(--muted); font-size:13px; }
 .app-shell { display:flex; min-height:100vh; }
-.sidebar { width:250px; background:#050c1c; padding:24px 18px; display:flex; flex-direction:column; gap:24px; border-right:1px solid #0f172a; position:sticky; top:0; height:100vh; }
+.sidebar { width:250px; background:#050c1c; padding:24px 18px; display:flex; flex-direction:column; gap:24px; border-right:1px solid #0f172a; position:sticky; top:0; height:100vh; overflow-y:auto; overflow-x:hidden; }
+.nav { overflow-y:auto; flex-shrink:1; }
 .brand { display:flex; align-items:center; gap:12px; }
 .brand-icon { width:42px; height:42px; border-radius:14px; background:#1d4ed8; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:18px; }
 .brand-title { font-size:18px; font-weight:600; line-height:1.2; }
