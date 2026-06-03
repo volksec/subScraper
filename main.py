@@ -494,7 +494,11 @@ SYSTEM_RESOURCE_FILE = DATA_DIR / "system_resources.json"
 
 def log(msg: str) -> None:
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{ts} UTC] {msg}")
+    try:
+        print(f"[{ts} UTC] {msg}")
+    except UnicodeEncodeError:
+        safe = msg.encode('ascii', errors='replace').decode('ascii')
+        print(f"[{ts} UTC] {safe}")
 
 
 def ensure_dirs() -> None:
@@ -17196,6 +17200,15 @@ def run_server(host: str, port: int, interval: int, use_https: bool = False, cer
 # ================== CLI ==================
 
 def main():
+    # Ensure stdout/stderr use UTF-8 on Windows (avoids UnicodeEncodeError with emoji)
+    if sys.stdout.encoding and sys.stdout.encoding.lower() not in ('utf-8', 'utf8'):
+        try:
+            import io as _io
+            sys.stdout = _io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+            sys.stderr = _io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+        except Exception:
+            pass
+
     parser = argparse.ArgumentParser(description="Recon pipeline + web command center")
     parser.add_argument(
         "domain",
