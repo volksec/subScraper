@@ -8444,16 +8444,18 @@ console.log('[DEBUG] Script loading started');
 // ═══════════════════════════════════════════════════════════
 async function apiFetch(url, options = {}) {
   const resp = await fetch(url, options);
-  // Redirected to login (session expired)
+  // Redirected to login (session expired) — navigate silently, no toast
   if (resp.redirected && resp.url.includes('/login')) {
     window.location.href = '/login';
-    throw new Error('Session expired. Redirecting to login…');
+    await new Promise(() => {}); // block until page navigates away
   }
   const ct = resp.headers.get('content-type') || '';
-  if (!ct.includes('application/json') && !ct.includes('text/plain') && !ct.includes('application/octet-stream')) {
-    // Likely got the login HTML page instead of API response
+  const isJson = ct.includes('application/json');
+  const isText = ct.includes('text/plain') || ct.includes('application/octet-stream');
+  if (!isJson && !isText) {
+    // Got HTML instead of API response (login page) — redirect silently
     window.location.href = '/login';
-    throw new Error('Session expired. Redirecting to login…');
+    await new Promise(() => {});
   }
   return resp;
 }

@@ -5,6 +5,9 @@ FROM --platform=$BUILDPLATFORM python:3.11-slim AS base
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=utf-8 \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
     DEBIAN_FRONTEND=noninteractive \
     GO_VERSION=1.21.5
 
@@ -13,6 +16,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     wget \
     git \
+    unzip \
     build-essential \
     libssl-dev \
     ca-certificates \
@@ -67,7 +71,7 @@ RUN case ${TARGETARCH} in \
     rm findomain.zip || echo "Findomain installation skipped for ${TARGETARCH}"
 
 # Install Python-based tools
-RUN pip install --no-cache-dir sublist3r nikto-parser
+RUN pip install --no-cache-dir sublist3r nikto-parser psutil
 
 # Install nikto (Perl-based)
 RUN apt-get update && apt-get install -y nikto && rm -rf /var/lib/apt/lists/*
@@ -80,30 +84,22 @@ WORKDIR /app
 
 # Copy application files
 COPY main.py /app/
-COPY README.md /app/
 
 # Create data directory
-# This directory stores all application data including:
-# - state.json: scan results and subdomain data
-# - config.json: application configuration
-# - completed_jobs.json: job history (NEW - keeps reports visible in dashboard)
-# - monitors.json: monitor configurations
-# - history/: domain-specific command logs
-# - screenshots/: captured screenshots
-# - backups/: automatic and manual backups
+# Stores all app data: SQLite DB, screenshots, backups, history
 RUN mkdir -p /app/recon_data
 
 # Declare volume for persistent data
-# Mount this directory to preserve data across container restarts:
+# Mount to preserve data across restarts:
 #   docker run -v $(pwd)/recon_data:/app/recon_data ...
 VOLUME ["/app/recon_data"]
 
-# Expose port for web interface
+# Expose web interface port
 EXPOSE 8342
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8342/api/state || exit 1
+# Health check — waits up to 60s for first startup (tool verification takes time)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+    CMD curl -sf http://localhost:8342/login | grep -q 'html' || exit 1
 
-# Default command - launch web server
-CMD ["python3", "main.py", "--host", "0.0.0.0", "--port", "8342"]
+# Launch web server — skip interactive setup wizard (configure via web UI)
+CMD ["python3", "main.py", "--host", "0.0.0.0", "--port", "8342", "--skip-setup"]
