@@ -43,7 +43,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, urlparse, unquote
+from urllib.parse import parse_qs, urlparse, unquote, urljoin
 from urllib.request import Request, urlopen
 
 try:
@@ -66,6 +66,7 @@ SCREENSHOTS_DIR = DATA_DIR / "screenshots"
 MONITORS_FILE = DATA_DIR / "monitors.json"
 BACKUPS_DIR = DATA_DIR / "backups"
 COMPLETED_JOBS_FILE = DATA_DIR / "completed_jobs.json"
+ACTIVE_JOBS_FILE = DATA_DIR / "active_jobs.json"
 
 # Authentication & Session Management
 SESSION_TIMEOUT_HOURS = 24
@@ -284,7 +285,7 @@ RUNNING_JOBS: Dict[str, Dict[str, Any]] = {}
 COMPLETED_JOBS: Dict[str, Dict[str, Any]] = {}  # Store completed job reports
 MAX_COMPLETED_JOBS_PER_DOMAIN = 10  # Keep last N completed jobs per domain
 JOB_LOCK = threading.Lock()
-PIPELINE_STEPS = ["amass", "subfinder", "assetfinder", "findomain", "sublist3r", "crtsh", "github-subdomains", "dnsx", "httpx", "screenshots", "nuclei", "nikto"]
+PIPELINE_STEPS = ["amass", "subfinder", "assetfinder", "findomain", "sublist3r", "crtsh", "github-subdomains", "dnsx", "httpx", "screenshots", "nuclei", "jsscan", "nikto"]
 
 # Global rate limiter
 RATE_LIMIT_LOCK = threading.Lock()
@@ -1663,6 +1664,10 @@ def default_config() -> Dict[str, Any]:
         "enable_dnsx": True,
         "enable_waybackurls": True,
         "enable_gau": True,
+        "enable_js_scan": True,
+        "js_scan_max_files": 300,
+        "js_scan_max_html_hosts": 60,
+        "js_scan_workers": 8,
         "wildcard_tlds": ["com", "net", "org", "io", "co", "app", "dev", "us", "uk", "in", "de"],
         "subfinder_threads": 32,
         "assetfinder_threads": 10,
@@ -3257,7 +3262,7 @@ def update_config_settings(values: Dict[str, Any]) -> Tuple[bool, str, Dict[str,
             cfg["enable_amass"] = new_amass
             changed = True
 
-    for key in ["enable_subfinder", "enable_assetfinder", "enable_findomain", "enable_sublist3r", "enable_screenshots", "enable_crtsh", "enable_github_subdomains", "enable_dnsx", "enable_waybackurls", "enable_gau"]:
+    for key in ["enable_subfinder", "enable_assetfinder", "enable_findomain", "enable_sublist3r", "enable_screenshots", "enable_crtsh", "enable_github_subdomains", "enable_dnsx", "enable_waybackurls", "enable_gau", "enable_js_scan"]:
         if key in values:
             new_value = bool_from_value(values.get(key), cfg.get(key, True))
             if cfg.get(key, True) != new_value:
@@ -3401,24 +3406,97 @@ def update_config_settings(values: Dict[str, Any]) -> Tuple[bool, str, Dict[str,
     return True, "No changes applied.", cfg
 
 
+def _pid_alive(pid: int) -> bool:
+    """True if a process with pid exists (signal 0 probe)."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Exists but owned by another user
+        return True
+    except OSError:
+        return False
+
+
+# Consider a lock stale if its holder is dead, or it's older than this many
+# seconds regardless (guards against unknown-holder / clock-skew cases).
+LOCK_STALE_SECONDS = 300
+
+
+def _lock_is_stale() -> bool:
+    """A lock is stale if the recorded PID is dead or the file is too old."""
+    try:
+        raw = Path(LOCK_FILE).read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return False
+    # Content is "<pid>\n<epoch>"; tolerate legacy empty locks via mtime.
+    pid = 0
+    if raw:
+        try:
+            pid = int(raw.splitlines()[0])
+        except (ValueError, IndexError):
+            pid = 0
+    if pid and not _pid_alive(pid):
+        return True
+    try:
+        age = time.time() - os.path.getmtime(LOCK_FILE)
+    except OSError:
+        return False
+    return age > LOCK_STALE_SECONDS
+
+
+def _steal_lock() -> bool:
+    """Remove a lock we believe is stale. Return True if we removed it."""
+    try:
+        os.unlink(LOCK_FILE)
+        return True
+    except FileNotFoundError:
+        return True  # someone else released it; retry acquire
+    except OSError:
+        return False
+
+
 def acquire_lock(timeout: int = 30) -> None:
     """
-    Very simple file lock with exponential backoff; best-effort to avoid concurrent writes.
-    Increased timeout from 10s to 30s and added exponential backoff to reduce contention.
+    Simple file lock with exponential backoff and stale-lock recovery.
+
+    Writes the owning PID + timestamp into the lock file so a crashed holder's
+    lock can be detected (dead PID) and reclaimed instead of blocking the full
+    timeout and then proceeding without ownership (which risked concurrent
+    writes / corruption).
     """
     start = time.time()
     retry_delay = 0.1  # Start with 100ms
     max_retry_delay = 2.0  # Cap at 2 seconds
-    
+    payload = f"{os.getpid()}\n{int(time.time())}".encode("utf-8")
+
     while True:
         try:
             # use exclusive create
             fd = os.open(LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.close(fd)
+            try:
+                os.write(fd, payload)
+            finally:
+                os.close(fd)
             return
         except FileExistsError:
+            # Reclaim a lock left behind by a dead/crashed process.
+            if _lock_is_stale() and _steal_lock():
+                log("Reclaimed stale lock; retrying acquire.")
+                continue
             elapsed = time.time() - start
             if elapsed > timeout:
+                # Last resort: force-steal so we hold the lock rather than
+                # writing without ownership.
+                if _steal_lock():
+                    log("Lock timeout reached; force-reclaimed lock.")
+                    continue
                 log("Lock timeout reached, proceeding anyway (best effort).")
                 return
             time.sleep(retry_delay)
@@ -5383,6 +5461,272 @@ def harvest_enumerator_outputs(
     return added
 
 
+# ================== JS GATHERER & SECRET/ENDPOINT SCANNER ==================
+#
+# Self-contained (stdlib only): fetches JS assets referenced by live hosts and
+# archived endpoints, then scans them for secrets/keys, hidden endpoints and
+# parameters. No external binary required.
+
+# Secret / key patterns. Ordered most-specific first. Values are compiled below.
+_JS_SECRET_PATTERN_SRC: List[Tuple[str, str]] = [
+    ("aws_access_key_id", r"\bAKIA[0-9A-Z]{16}\b"),
+    ("aws_secret_access_key", r"(?i)aws.{0,20}?['\"][0-9a-zA-Z/+]{40}['\"]"),
+    ("google_api_key", r"\bAIza[0-9A-Za-z\-_]{35}\b"),
+    ("google_oauth_token", r"\bya29\.[0-9A-Za-z\-_]{20,}"),
+    ("gcp_service_account", r"\"type\"\s*:\s*\"service_account\""),
+    ("firebase_cloud_msg_key", r"\bAAAA[A-Za-z0-9_-]{7}:[A-Za-z0-9_-]{140}\b"),
+    ("github_token", r"\b(?:ghp|gho|ghu|ghs|ghr)_[0-9A-Za-z]{36}\b"),
+    ("github_pat", r"\bgithub_pat_[0-9A-Za-z_]{22,}\b"),
+    ("slack_token", r"\bxox[baprs]-[0-9A-Za-z-]{10,48}\b"),
+    ("slack_webhook", r"https://hooks\.slack\.com/services/[A-Za-z0-9_/]+"),
+    ("stripe_key", r"\b[rsp]k_live_[0-9a-zA-Z]{24,}\b"),
+    ("square_token", r"\bsq0atp-[0-9A-Za-z\-_]{22}\b"),
+    ("twilio_sid", r"\bAC[0-9a-fA-F]{32}\b"),
+    ("sendgrid_key", r"\bSG\.[0-9A-Za-z\-_]{22}\.[0-9A-Za-z\-_]{43}\b"),
+    ("mailgun_key", r"\bkey-[0-9a-zA-Z]{32}\b"),
+    ("npm_token", r"\bnpm_[0-9A-Za-z]{36}\b"),
+    ("jwt", r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
+    ("private_key", r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----"),
+    ("basic_auth_url", r"https?://[a-zA-Z0-9._%+-]+:[^@\s/'\"]{3,}@[a-zA-Z0-9.-]+"),
+    ("generic_secret",
+     r"(?i)(?:api[_-]?key|apikey|secret|client[_-]?secret|auth[_-]?token|"
+     r"access[_-]?token|password|passwd|bearer)[\"']?\s*[:=]\s*[\"']([^\"'\s]{8,64})[\"']"),
+]
+_JS_SECRET_PATTERNS = [(name, re.compile(src)) for name, src in _JS_SECRET_PATTERN_SRC]
+
+# Endpoint patterns: relative paths, absolute URLs, and common HTTP call sites.
+_JS_ENDPOINT_PATTERNS = [
+    re.compile(r"""['"](/[a-zA-Z0-9_\-./]{1,}(?:\?[a-zA-Z0-9_\-=&%.]*)?)['"]"""),
+    re.compile(r"""(?:fetch|axios(?:\.\w+)?|\.(?:get|post|put|delete|patch|open))\(\s*['"]([^'"\s]{2,200})['"]"""),
+    re.compile(r"""['"](https?://[a-zA-Z0-9._\-]+(?:/[a-zA-Z0-9_\-./]*)?(?:\?[a-zA-Z0-9_\-=&%.]*)?)['"]"""),
+]
+_JS_PARAM_RE = re.compile(r"[?&]([a-zA-Z0-9_\-]{1,40})=")
+
+# Placeholder values to drop from generic-secret hits (reduce false positives).
+_JS_SECRET_PLACEHOLDERS = re.compile(
+    r"(?i)^(?:x{3,}|y{3,}|0{3,}|your[_-]?|example|test|sample|placeholder|"
+    r"changeme|none|null|undefined|false|true|abc123|xxxxxx|redacted|\.{2,})"
+)
+# Static-asset extensions to exclude from the endpoint list.
+_JS_ASSET_EXT = re.compile(
+    r"\.(?:png|jpe?g|gif|svg|webp|ico|css|woff2?|ttf|eot|mp4|webm|mp3|"
+    r"map|pdf|zip|gz|wasm)(?:\?|$)", re.IGNORECASE)
+
+
+def _js_fetch(url: str, timeout: int = 15, max_bytes: int = 5_000_000) -> Optional[str]:
+    """GET a URL, returning decoded text (bounded), or None on failure."""
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; subScraper-jsscan/1.0)",
+            "Accept": "*/*",
+        })
+        with urlopen(req, timeout=timeout, context=ctx) as resp:
+            raw = resp.read(max_bytes + 1)
+    except (HTTPError, URLError, ssl.SSLError, TimeoutError, OSError, ValueError):
+        return None
+    except Exception:
+        return None
+    if len(raw) > max_bytes:
+        raw = raw[:max_bytes]
+    return raw.decode("utf-8", errors="replace")
+
+
+def _redact_secret(value: str) -> str:
+    value = value.strip()
+    if len(value) <= 8:
+        return value[0] + "***" if value else "***"
+    return f"{value[:4]}…{value[-4:]} ({len(value)} chars)"
+
+
+def scan_js_content(text: str, source: str) -> Dict[str, List[Dict[str, Any]]]:
+    """Scan one JS/HTML blob for secrets, endpoints and parameters."""
+    secrets: List[Dict[str, Any]] = []
+    endpoints: set = set()
+    params: set = set()
+
+    for name, pattern in _JS_SECRET_PATTERNS:
+        for m in pattern.finditer(text):
+            captured = m.group(1) if m.groups() else m.group(0)
+            if name == "generic_secret" and _JS_SECRET_PLACEHOLDERS.search(captured or ""):
+                continue
+            secrets.append({
+                "type": name,
+                "match": _redact_secret(captured or m.group(0)),
+                "source": source,
+            })
+
+    for pattern in _JS_ENDPOINT_PATTERNS:
+        for m in pattern.finditer(text):
+            ep = (m.group(1) or "").strip()
+            if len(ep) < 2 or _JS_ASSET_EXT.search(ep):
+                continue
+            # Skip pure MIME/type strings and template noise.
+            if ep.startswith("//") or " " in ep or "${" in ep:
+                continue
+            endpoints.add(ep)
+            for pm in _JS_PARAM_RE.finditer(ep):
+                params.add(pm.group(1))
+
+    return {
+        "secrets": secrets,
+        "endpoints": sorted(endpoints),
+        "params": sorted(params),
+    }
+
+
+def _gather_js_urls(domain: str, state: Dict[str, Any], config: Dict[str, Any]) -> List[str]:
+    """Collect candidate JS URLs from archived endpoints and live-host HTML."""
+    tgt = ensure_target_state(state, domain)
+    submap = tgt.get("subdomains", {})
+    max_html = int(config.get("js_scan_max_html_hosts", 60) or 60)
+
+    js_urls: set = set()
+
+    # 1) Archived endpoints ending in .js
+    for url in tgt.get("endpoints", []) or []:
+        base = url.split("?", 1)[0].lower()
+        if base.endswith(".js") or base.endswith(".mjs"):
+            js_urls.add(url)
+
+    # 2) Parse live-host HTML for <script src=...>
+    live_urls: List[str] = []
+    for host, entry in submap.items():
+        httpx = (entry or {}).get("httpx") or {}
+        url = httpx.get("url")
+        status = httpx.get("status_code")
+        if url and status and status != 0:
+            live_urls.append(url)
+    live_urls = live_urls[:max_html]
+
+    script_re = re.compile(r"""<script[^>]+src\s*=\s*['"]([^'"]+)['"]""", re.IGNORECASE)
+    for base_url in live_urls:
+        html = _js_fetch(base_url, timeout=12, max_bytes=2_000_000)
+        if not html:
+            continue
+        for src in script_re.findall(html):
+            src = src.strip()
+            if not src or src.startswith("data:"):
+                continue
+            try:
+                absolute = urljoin(base_url, src)
+            except ValueError:
+                continue
+            path = absolute.split("?", 1)[0].lower()
+            if path.endswith(".js") or path.endswith(".mjs"):
+                js_urls.add(absolute)
+
+    return sorted(js_urls)
+
+
+def run_js_scan(domain: str, config: Dict[str, Any],
+                job_domain: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Gather JS assets for a target and scan them for secrets, hidden endpoints
+    and parameters. Persists results under target['js_scan'] and returns it.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    state = load_state()
+    js_urls = _gather_js_urls(domain, state, config)
+    max_files = int(config.get("js_scan_max_files", 300) or 300)
+    truncated = len(js_urls) > max_files
+    if truncated:
+        js_urls = js_urls[:max_files]
+
+    if job_domain:
+        job_log_append(job_domain, f"JS scan: {len(js_urls)} JS file(s) to fetch.", "jsscan")
+
+    files: List[Dict[str, Any]] = []
+    all_secrets: List[Dict[str, Any]] = []
+    endpoint_set: set = set()
+    param_set: set = set()
+    seen_secret_keys: set = set()
+
+    def worker(u: str) -> Optional[Dict[str, Any]]:
+        text = _js_fetch(u)
+        if text is None:
+            return {"url": u, "ok": False, "size": 0, "secrets": 0, "endpoints": 0}
+        res = scan_js_content(text, u)
+        return {"url": u, "ok": True, "size": len(text), "result": res}
+
+    workers = max(1, min(10, int(config.get("js_scan_workers", 8) or 8)))
+    if js_urls:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(worker, u): u for u in js_urls}
+            for fut in as_completed(futures):
+                try:
+                    item = fut.result()
+                except Exception:
+                    continue
+                if not item:
+                    continue
+                if not item.get("ok"):
+                    files.append(item)
+                    continue
+                res = item.pop("result")
+                for sec in res["secrets"]:
+                    key = (sec["type"], sec["match"], sec["source"])
+                    if key in seen_secret_keys:
+                        continue
+                    seen_secret_keys.add(key)
+                    all_secrets.append(sec)
+                endpoint_set.update(res["endpoints"])
+                param_set.update(res["params"])
+                files.append({
+                    "url": item["url"],
+                    "ok": True,
+                    "size": item["size"],
+                    "secrets": len(res["secrets"]),
+                    "endpoints": len(res["endpoints"]),
+                })
+
+    # Cap stored lists to keep state lean.
+    endpoints_sorted = sorted(endpoint_set)[:5000]
+    params_sorted = sorted(param_set)[:2000]
+    all_secrets = all_secrets[:1000]
+
+    js_scan = {
+        "scanned_at": datetime.now(timezone.utc).isoformat(),
+        "files": sorted(files, key=lambda f: (not f.get("ok"), f.get("url", ""))),
+        "secrets": all_secrets,
+        "endpoints": endpoints_sorted,
+        "params": params_sorted,
+        "truncated": truncated,
+        "summary": {
+            "files": len(files),
+            "files_ok": sum(1 for f in files if f.get("ok")),
+            "secrets": len(all_secrets),
+            "endpoints": len(endpoints_sorted),
+            "params": len(params_sorted),
+        },
+    }
+
+    # Persist.
+    state = load_state()
+    tgt = ensure_target_state(state, domain)
+    tgt["js_scan"] = js_scan
+    # Merge discovered endpoints into the target endpoints list too.
+    existing = set(tgt.get("endpoints", []) or [])
+    for ep in endpoints_sorted:
+        if ep.startswith("http") and ep not in existing:
+            existing.add(ep)
+    tgt["endpoints"] = sorted(existing)[:20000]
+    save_state(state)
+
+    if job_domain:
+        s = js_scan["summary"]
+        job_log_append(
+            job_domain,
+            f"JS scan done: {s['files_ok']}/{s['files']} files, "
+            f"{s['secrets']} secret(s), {s['endpoints']} endpoint(s), {s['params']} param(s).",
+            "jsscan",
+        )
+    return js_scan
+
+
 def run_downstream_pipeline(
     domain: str,
     wordlist: Optional[str],
@@ -5604,6 +5948,33 @@ def run_downstream_pipeline(
     flags = ensure_target_state(state, domain)["flags"]
     all_subs = sorted(ensure_target_state(state, domain)["subdomains"].keys())
 
+    # ---------- JS gather & secret/endpoint scan ----------
+    if not config.get("enable_js_scan", True):
+        update_step("jsscan", status="skipped", message="JS scan disabled in settings.", progress=0)
+        flags["js_scan_done"] = True
+        save_state(state)
+    elif flags.get("js_scan_done"):
+        update_step("jsscan", status="skipped", message="JS scan already completed for this target.", progress=0)
+    else:
+        update_step("jsscan", status="running", message="Gathering & scanning JS assets…", progress=40)
+        try:
+            js_scan = run_js_scan(domain, config, job_domain=job_domain)
+            s = js_scan.get("summary", {})
+            update_step(
+                "jsscan", status="completed",
+                message=(f"JS scan: {s.get('secrets', 0)} secret(s), "
+                         f"{s.get('endpoints', 0)} endpoint(s), {s.get('params', 0)} param(s) "
+                         f"across {s.get('files_ok', 0)} file(s)."),
+                progress=100,
+            )
+        except Exception as exc:
+            log(f"JS scan failed for {domain}: {exc}")
+            update_step("jsscan", status="error", message=f"JS scan failed: {exc}", progress=100)
+        state = load_state()
+        flags = ensure_target_state(state, domain)["flags"]
+        flags["js_scan_done"] = True
+        save_state(state)
+
     # ---------- nikto ----------
     if skip_nikto:
         update_step("nikto", status="skipped", message="Nikto skipped per run options.", progress=0)
@@ -5813,6 +6184,98 @@ def gather_screenshot_targets(state: Dict[str, Any], domain: str) -> List[Tuple[
     return targets
 
 
+def reconcile_screenshots_from_disk(state: Dict[str, Any], domain: str) -> int:
+    """
+    Attach screenshot files already on disk to subdomains missing a screenshot
+    in state. Self-heals targets captured before the filename-matching fix.
+    Returns the number of newly attached screenshots.
+    """
+    dest_dir = SCREENSHOTS_DIR / domain
+    if not dest_dir.is_dir():
+        return 0
+    tgt = ensure_target_state(state, domain)
+    submap = tgt.get("subdomains", {})
+    if not submap:
+        return 0
+
+    # Build host-key -> (path, mtime) from files on disk.
+    file_index: Dict[str, Tuple[Path, float]] = {}
+    for extension in ["*.jpeg", "*.jpg", "*.png"]:
+        for path in dest_dir.rglob(extension):
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            keys = {_normalize_identifier(path.stem)}
+            for host_key in _screenshot_host_keys(path.stem):
+                keys.add(host_key)
+            for key in keys:
+                if not key:
+                    continue
+                existing = file_index.get(key)
+                if existing is None or mtime > existing[1]:
+                    file_index[key] = (path, mtime)
+
+    if not file_index:
+        return 0
+
+    attached = 0
+    for host, entry in submap.items():
+        if not isinstance(entry, dict) or entry.get("screenshot"):
+            continue
+        httpx = entry.get("httpx") or {}
+        candidates = [_normalize_identifier(host)]
+        url = httpx.get("url")
+        if url:
+            candidates.insert(0, _normalize_identifier(url))
+        match: Optional[Path] = None
+        for cand in candidates:
+            found = file_index.get(cand)
+            if found:
+                match = found[0]
+                break
+        if not match or not match.exists():
+            continue
+        try:
+            rel_path = match.relative_to(SCREENSHOTS_DIR)
+        except ValueError:
+            rel_path = match
+        try:
+            captured = datetime.fromtimestamp(
+                match.stat().st_mtime, tz=timezone.utc
+            ).isoformat()
+        except OSError:
+            captured = datetime.now(timezone.utc).isoformat()
+        entry["screenshot"] = {
+            "path": str(rel_path).replace("\\", "/"),
+            "url": url or f"http://{host}",
+            "captured_at": captured,
+        }
+        attached += 1
+    return attached
+
+
+def _screenshot_host_keys(stem: str) -> List[str]:
+    """
+    Derive normalized host keys from a gowitness screenshot filename stem.
+
+    gowitness v3 names files like "https---youtube-ui.l.google.com-443"
+    (scheme "---" host "-" port). Extract the host so it matches the target
+    host/URL, and also emit the port-stripped variant for robustness.
+    """
+    keys: List[str] = []
+    core = stem
+    # Strip leading "<scheme>---" if present.
+    if "---" in core:
+        core = core.split("---", 1)[1]
+    # Strip trailing "-<port>" if the tail looks like a port number.
+    m = re.match(r"^(.*)-(\d{1,5})$", core)
+    if m:
+        keys.append(_normalize_identifier(m.group(1)))
+    keys.append(_normalize_identifier(core))
+    return [k for k in keys if k]
+
+
 def capture_screenshots(
     targets: List[Tuple[str, str]],
     domain: str,
@@ -5843,9 +6306,9 @@ def capture_screenshots(
         "file",
         "-f", str(target_file),
         "-s", str(dest_dir),
-        "--db", str(db_path),
         "--write-db",
-        "--log-level", "error",
+        "--write-db-uri", f"sqlite://{db_path}",
+        "--quiet",
         "--timeout", "30",  # Timeout per URL to prevent getting stuck
         "--delay", "1",      # Small delay between requests
     ]
@@ -5876,9 +6339,15 @@ def capture_screenshots(
                 continue
             if mtime < cutoff:
                 continue
-            key = _normalize_identifier(path.stem)
-            if key not in recent_files:  # Don't overwrite if already found with higher priority extension
-                recent_files[key] = path
+            # Key by the full stem (legacy naming) and, for gowitness v3
+            # filenames of the form "<scheme>---<host>-<port>", also by the
+            # extracted host so URL/host lookups below can match.
+            keys = {_normalize_identifier(path.stem)}
+            for host_key in _screenshot_host_keys(path.stem):
+                keys.add(host_key)
+            for key in keys:
+                if key and key not in recent_files:
+                    recent_files[key] = path
 
     mapping: Dict[str, Dict[str, Any]] = {}
     captured_ts = datetime.now(timezone.utc).isoformat()
@@ -6087,6 +6556,7 @@ def ensure_target_state(state: Dict[str, Any], domain: str) -> Dict[str, Any]:
             "httpx_done": False,
             "screenshots_done": False,
             "nuclei_done": False,
+            "js_scan_done": False,
             "nikto_done": False,
         }
     })
@@ -6096,7 +6566,7 @@ def ensure_target_state(state: Dict[str, Any], domain: str) -> Dict[str, Any]:
     tgt.setdefault("flags", {})
     tgt.setdefault("options", {})
     for k in ["amass_done", "subfinder_done", "assetfinder_done", "findomain_done", "sublist3r_done",
-              "ffuf_done", "httpx_done", "screenshots_done", "nuclei_done", "nikto_done"]:
+              "ffuf_done", "httpx_done", "screenshots_done", "nuclei_done", "js_scan_done", "nikto_done"]:
         tgt["flags"].setdefault(k, False)
     for sub, entry in list(tgt["subdomains"].items()):
         if not isinstance(entry, dict):
@@ -6701,10 +7171,12 @@ def _start_job_thread(job: Dict[str, Any]) -> None:
             # Save outside the lock to avoid deadlock (add_completed_job acquires lock)
             if job_to_save:
                 add_completed_job(domain, job_to_save)
-            
+
             # Schedule next jobs after cleanup
             schedule_jobs()
             cleanup_job_control(domain)
+            # Update on-disk active-job snapshot (this job is now finished).
+            persist_active_jobs()
 
     thread = threading.Thread(target=runner, name=f"pipeline-{domain}", daemon=True)
     with JOB_LOCK:
@@ -6743,6 +7215,89 @@ def schedule_jobs() -> None:
         # Start the job (this acquires JOB_LOCK internally)
         if job_to_start:
             _start_job_thread(job_to_start)
+
+
+# ================== JOB PERSISTENCE (survive restarts) ==================
+#
+# Active (queued/running/paused) jobs are snapshotted to disk so an app restart
+# can re-dispatch them. Re-dispatch is safe because the pipeline is idempotent:
+# per-target flags in state track completed steps, so a resumed job continues
+# where it left off rather than redoing finished work.
+
+# Statuses that represent unfinished work worth restoring after a restart.
+_ACTIVE_JOB_STATUSES = {"queued", "running", "dispatching", "paused", "pausing"}
+
+
+def persist_active_jobs() -> None:
+    """Snapshot unfinished jobs to disk. Safe to call without holding JOB_LOCK."""
+    try:
+        with JOB_LOCK:
+            snapshot = []
+            for domain, job in RUNNING_JOBS.items():
+                if job.get("status") not in _ACTIVE_JOB_STATUSES:
+                    continue
+                snapshot.append({
+                    "domain": domain,
+                    "wordlist": job.get("wordlist") or "",
+                    "skip_nikto": bool(job.get("skip_nikto", False)),
+                    "interval": job.get("interval", DEFAULT_INTERVAL),
+                    "status": job.get("status"),
+                    "queued_at": job.get("queued_at"),
+                })
+        atomic_write_json(ACTIVE_JOBS_FILE, {"jobs": snapshot})
+    except Exception as exc:
+        log(f"Failed to persist active jobs: {exc}")
+
+
+def restore_active_jobs() -> int:
+    """Re-dispatch jobs persisted before the last shutdown. Returns count restored."""
+    if not ACTIVE_JOBS_FILE.exists():
+        return 0
+    try:
+        with open(ACTIVE_JOBS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        log(f"Could not read active jobs file: {exc}")
+        return 0
+
+    jobs = data.get("jobs", []) if isinstance(data, dict) else []
+    restored = 0
+    for entry in jobs:
+        domain = (entry.get("domain") or "").strip().lower()
+        if not domain:
+            continue
+        wordlist = entry.get("wordlist") or None
+        skip_nikto = bool(entry.get("skip_nikto", False))
+        interval = entry.get("interval") or None
+        try:
+            ok, msg = start_pipeline_job(domain, wordlist, skip_nikto, interval)
+            if ok:
+                restored += 1
+                job_log_append(domain, "Job restored after app restart; resuming.", "scheduler")
+        except Exception as exc:
+            log(f"Failed to restore job {domain}: {exc}")
+    if restored:
+        log(f"Restored {restored} job(s) from before restart; resuming where they left off.")
+    return restored
+
+
+def active_jobs_persist_loop() -> None:
+    """Periodically persist active jobs so a crash/restart loses at most ~10s."""
+    while True:
+        try:
+            time.sleep(10)
+            persist_active_jobs()
+        except Exception:
+            # Never let the persister thread die.
+            try:
+                time.sleep(10)
+            except Exception:
+                pass
+
+
+def start_active_jobs_persister() -> None:
+    thread = threading.Thread(target=active_jobs_persist_loop, name="active-jobs-persister", daemon=True)
+    thread.start()
 
 
 # ================== WEB COMMAND CENTER ==================
@@ -7671,6 +8226,24 @@ button.loading::after, .btn.loading::after {
             </div>
           </div>
         </div>
+        <div class="card" style="margin-top: 16px;">
+          <h3>Import Domain List</h3>
+          <p class="muted">Bulk-import hosts from a file or paste. Each host is added under its parent domain and the tooling (dnsx, httpx, screenshots, nuclei) runs on it — enumeration is skipped.</p>
+          <form id="import-form">
+            <label for="import-file">File (.txt, .csv, .asciipb, .json)
+              <input id="import-file" type="file" accept=".txt,.csv,.asciipb,.pb,.json,.list,text/plain" />
+            </label>
+            <label for="import-content">…or paste a list / asciipb content
+              <textarea id="import-content" name="content" rows="6" placeholder="accounts.google.com&#10;admin.google.com&#10;# or Google bug-hunters asciipb:&#10;domain: { fqdn: &quot;flash.android.com&quot; tier: TIER0 }"></textarea>
+            </label>
+            <label class="checkbox">
+              <input id="import-skip-nikto" type="checkbox" name="skip_nikto" />
+              Skip Nikto for imported hosts
+            </label>
+            <button type="submit">Import &amp; Run</button>
+          </form>
+          <div class="status" id="import-status"></div>
+        </div>
       </div>
     </section>
 
@@ -7955,6 +8528,10 @@ button.loading::after, .btn.loading::after {
               <label class="checkbox">
                 <input id="settings-enable-gau" type="checkbox" name="enable_gau" />
                 Enable GAU
+              </label>
+              <label class="checkbox">
+                <input id="settings-enable-js-scan" type="checkbox" name="enable_js_scan" />
+                Enable JS Scan (secrets, endpoints, params)
               </label>
             </div>
           </div>
@@ -8755,6 +9332,11 @@ const launchWordlist = document.getElementById('launch-wordlist');
 const launchInterval = document.getElementById('launch-interval');
 const launchSkipNikto = document.getElementById('launch-skip-nikto');
 const launchStatus = document.getElementById('launch-status');
+const importForm = document.getElementById('import-form');
+const importFile = document.getElementById('import-file');
+const importContent = document.getElementById('import-content');
+const importSkipNikto = document.getElementById('import-skip-nikto');
+const importStatus = document.getElementById('import-status');
 const jobsList = document.getElementById('jobs-list');
 const queueList = document.getElementById('queue-list');
 const targetsList = document.getElementById('targets-list');
@@ -8789,6 +9371,7 @@ const settingsEnableGithubSubdomains = document.getElementById('settings-enable-
 const settingsEnableDnsx = document.getElementById('settings-enable-dnsx');
 const settingsEnableWaybackurls = document.getElementById('settings-enable-waybackurls');
 const settingsEnableGau = document.getElementById('settings-enable-gau');
+const settingsEnableJsScan = document.getElementById('settings-enable-js-scan');
 const settingsSubfinderThreads = document.getElementById('settings-subfinder-threads');
 const settingsAssetfinderThreads = document.getElementById('settings-assetfinder-threads');
 const settingsFindomainThreads = document.getElementById('settings-findomain-threads');
@@ -8879,6 +9462,7 @@ const STEP_SEQUENCE = [
   { flag: 'gau_done', label: 'GAU' },
   { flag: 'screenshots_done', label: 'Screenshots', skipWhen: () => latestConfig.enable_screenshots === false },
   { flag: 'nuclei_done', label: 'Nuclei' },
+  { flag: 'js_scan_done', label: 'JS Scan', skipWhen: () => latestConfig.enable_js_scan === false },
   { flag: 'nikto_done', label: 'Nikto', skipWhen: (info) => shouldSkipNikto(info) },
 ];
 const DEFAULT_PAGE_SIZE = 50;
@@ -10897,9 +11481,22 @@ function attachReportFilterListeners() {
     saveReportFiltersToStorage();
     renderReports(latestTargetsData);
   };
-  
+
   if (domainSearch) {
-    domainSearch.addEventListener('input', applyFilters);
+    let domainSearchTimer = null;
+    domainSearch.addEventListener('input', () => {
+      clearTimeout(domainSearchTimer);
+      domainSearchTimer = setTimeout(() => {
+        const caret = domainSearch.selectionStart;
+        applyFilters();
+        // Re-render recreates the input; restore focus + caret
+        const next = document.getElementById('report-domain-search');
+        if (next) {
+          next.focus();
+          try { next.setSelectionRange(caret, caret); } catch (e) {}
+        }
+      }, 350);
+    });
   }
   if (statusFilter) {
     statusFilter.addEventListener('change', applyFilters);
@@ -11720,6 +12317,83 @@ async function renderReportDetail(domain) {
     </div>
     <div class="table-pagination" id="${niktoPaginationId}"></div>
   ` : '<p class="muted">No Nikto findings recorded.</p>';
+  // JS scan section (secrets, endpoints, params gathered from JS assets)
+  const jsScan = info.js_scan || null;
+  const jsSecrets = (jsScan && jsScan.secrets) || [];
+  const jsEndpoints = (jsScan && jsScan.endpoints) || [];
+  const jsParams = (jsScan && jsScan.params) || [];
+  const jsFiles = (jsScan && jsScan.files) || [];
+  const jsSummary = (jsScan && jsScan.summary) || {};
+  const jsScanTitle = `JS Findings (${jsSecrets.length} secrets, ${jsEndpoints.length} endpoints)`;
+  const jsScanBody = jsScan ? `
+    <div class="report-stats-grid">
+      <div class="report-stat"><div class="label">JS files scanned</div><div class="value">${jsSummary.files_ok || 0}/${jsSummary.files || 0}</div></div>
+      <div class="report-stat"><div class="label">Secrets</div><div class="value">${jsSecrets.length}</div></div>
+      <div class="report-stat"><div class="label">Endpoints</div><div class="value">${jsEndpoints.length}</div></div>
+      <div class="report-stat"><div class="label">Parameters</div><div class="value">${jsParams.length}</div></div>
+    </div>
+    ${jsScan.truncated ? '<p class="muted">Note: JS file list was truncated to the configured limit.</p>' : ''}
+    <h4 style="margin:16px 0 6px;">Secrets & Keys</h4>
+    ${jsSecrets.length > 0 ? `
+    <div class="table-wrapper">
+      <table class="targets-table" id="js-secrets-table">
+        <thead><tr><th>Type</th><th>Match (redacted)</th><th>Source</th></tr></thead>
+        <tbody>
+          ${jsSecrets.slice(0, 500).map(s => `
+            <tr>
+              <td><span class="badge">${escapeHtml(s.type || '')}</span></td>
+              <td><code>${escapeHtml(s.match || '')}</code></td>
+              <td><a href="${escapeHtml(s.source || '#')}" target="_blank" class="link-btn">${escapeHtml(s.source || '')}</a></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="table-pagination" id="js-secrets-pagination"></div>
+    ` : '<p class="muted">No secrets or keys detected in JS.</p>'}
+    <h4 style="margin:16px 0 6px;">Discovered Endpoints</h4>
+    ${jsEndpoints.length > 0 ? `
+    <div class="filter-bar">
+      <input type="search" class="report-search" placeholder="Search JS endpoints…" data-js-endpoint-search />
+    </div>
+    <div class="table-wrapper">
+      <table class="targets-table" id="js-endpoints-table">
+        <thead><tr><th>Endpoint</th></tr></thead>
+        <tbody>
+          ${jsEndpoints.slice(0, 1000).map(ep => `
+            <tr data-js-endpoint="${escapeHtml((ep || '').toLowerCase())}">
+              <td><code>${escapeHtml(ep)}</code></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    ${jsEndpoints.length > 1000 ? `<p class="muted">Showing first 1000 of ${jsEndpoints.length} endpoints</p>` : ''}
+    <div class="table-pagination" id="js-endpoints-pagination"></div>
+    ` : '<p class="muted">No hidden endpoints found in JS.</p>'}
+    <h4 style="margin:16px 0 6px;">Parameters</h4>
+    ${jsParams.length > 0
+      ? `<div>${jsParams.slice(0, 500).map(p => `<span class="badge" style="margin:2px;">${escapeHtml(p)}</span>`).join(' ')}</div>`
+      : '<p class="muted">No parameters extracted.</p>'}
+    <h4 style="margin:16px 0 6px;">JS Files</h4>
+    ${jsFiles.length > 0 ? `
+    <div class="table-wrapper">
+      <table class="targets-table" id="js-files-table">
+        <thead><tr><th>URL</th><th>OK</th><th>Size</th><th>Secrets</th><th>Endpoints</th></tr></thead>
+        <tbody>
+          ${jsFiles.slice(0, 500).map(f => `
+            <tr>
+              <td><a href="${escapeHtml(f.url || '#')}" target="_blank" class="link-btn">${escapeHtml(f.url || '')}</a></td>
+              <td>${f.ok ? '✅' : '❌'}</td>
+              <td>${f.size || 0}</td>
+              <td>${f.secrets || 0}</td>
+              <td>${f.endpoints || 0}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="table-pagination" id="js-files-pagination"></div>
+    ` : '<p class="muted">No JS files fetched.</p>'}
+  ` : '<p class="muted">JS scan has not run for this target yet.</p>';
+
   const commandsBody = `
     <div data-command-log data-command-domain="${escapeHtml(domain)}">
       <p class="muted">Loading command history…</p>
@@ -11734,6 +12408,7 @@ async function renderReportDetail(domain) {
       <div class="report-actions">
         <a href="/domain/${encodeURIComponent(domain)}" class="btn small" target="_blank">View Domain Details</a>
         ${stats.screenshots > 0 ? `<a href="/gallery/${encodeURIComponent(domain)}" class="btn secondary small" target="_blank">View Screenshots Gallery</a>` : ''}
+        <button class="btn secondary small" data-js-scan-btn data-domain="${escapeHtml(domain)}">Run JS Scan</button>
         ${resumeButton}
         ${resumeNotice}
       </div>
@@ -11742,6 +12417,7 @@ async function renderReportDetail(domain) {
     ${renderCollapsibleSection('subdomains', subdomainsTitle, subdomainsBody, true)}
     ${endpoints.length > 0 ? renderCollapsibleSection('endpoints', endpointsTitle, endpointsBody, false) : ''}
     ${renderCollapsibleSection('nuclei', nucleiTitle, nucleiContent, nucleiRows.length > 0)}
+    ${renderCollapsibleSection('jsscan', jsScanTitle, jsScanBody, jsSecrets.length > 0)}
     ${renderCollapsibleSection('nikto', niktoTitle, niktoContent, false)}
     ${renderCollapsibleSection('commands', 'Command History', commandsBody, false)}
   `;
@@ -11754,6 +12430,49 @@ async function renderReportDetail(domain) {
   if (endpoints.length > 0) {
     initPagination(detail.querySelector('#endpoints-table'), detail.querySelector('#endpoints-pagination'), DEFAULT_PAGE_SIZE);
     attachEndpointFilter(detail);
+  }
+  if (jsSecrets.length > 0) {
+    initPagination(detail.querySelector('#js-secrets-table'), detail.querySelector('#js-secrets-pagination'), DEFAULT_PAGE_SIZE);
+  }
+  if (jsEndpoints.length > 0) {
+    initPagination(detail.querySelector('#js-endpoints-table'), detail.querySelector('#js-endpoints-pagination'), DEFAULT_PAGE_SIZE);
+    const jsSearch = detail.querySelector('[data-js-endpoint-search]');
+    const jsTable = detail.querySelector('#js-endpoints-table');
+    if (jsSearch && jsTable) {
+      jsSearch.addEventListener('input', () => {
+        const q = jsSearch.value.trim().toLowerCase();
+        const rows = jsTable.tBodies[0] ? Array.from(jsTable.tBodies[0].rows) : [];
+        rows.forEach(row => {
+          const ep = row.dataset.jsEndpoint || '';
+          row.dataset.filterHidden = (!q || ep.includes(q)) ? 'false' : 'true';
+        });
+        refreshPagination(jsTable);
+      });
+    }
+  }
+  if (jsFiles.length > 0) {
+    initPagination(detail.querySelector('#js-files-table'), detail.querySelector('#js-files-pagination'), DEFAULT_PAGE_SIZE);
+  }
+  const jsScanBtn = detail.querySelector('[data-js-scan-btn]');
+  if (jsScanBtn) {
+    jsScanBtn.addEventListener('click', async () => {
+      jsScanBtn.disabled = true;
+      const orig = jsScanBtn.textContent;
+      jsScanBtn.textContent = 'Scanning…';
+      try {
+        const resp = await fetch('/api/domain/js-scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain: jsScanBtn.getAttribute('data-domain') }),
+        });
+        const data = await resp.json();
+        jsScanBtn.textContent = data.success ? 'Scan started ✓' : 'Failed';
+        setTimeout(() => { jsScanBtn.textContent = orig; jsScanBtn.disabled = false; }, 4000);
+      } catch (err) {
+        jsScanBtn.textContent = 'Error';
+        setTimeout(() => { jsScanBtn.textContent = orig; jsScanBtn.disabled = false; }, 4000);
+      }
+    });
   }
   attachSubdomainFilters(detail);
   attachSeverityFilter(detail.querySelector('[data-nuclei-filter]'), detail.querySelector('#nuclei-table'));
@@ -12193,6 +12912,7 @@ function renderSettings(config, tools) {
     settingsEnableDnsx.checked = config.enable_dnsx !== false;
     settingsEnableWaybackurls.checked = config.enable_waybackurls !== false;
     settingsEnableGau.checked = config.enable_gau !== false;
+    if (settingsEnableJsScan) settingsEnableJsScan.checked = config.enable_js_scan !== false;
     settingsSubfinderThreads.value = config.subfinder_threads || 32;
     settingsAssetfinderThreads.value = config.assetfinder_threads || 10;
     settingsFindomainThreads.value = config.findomain_threads || 40;
@@ -12384,6 +13104,53 @@ launchForm.addEventListener('submit', async (event) => {
   }
 });
 
+if (importFile) {
+  importFile.addEventListener('change', async () => {
+    const file = importFile.files && importFile.files[0];
+    if (!file) return;
+    try {
+      importContent.value = await file.text();
+      importStatus.textContent = 'Loaded ' + file.name + ' (' + importContent.value.length + ' chars). Review and click Import & Run.';
+      importStatus.className = 'status';
+    } catch (err) {
+      importStatus.textContent = 'Could not read file: ' + err.message;
+      importStatus.className = 'status error';
+    }
+  });
+}
+
+if (importForm) {
+  importForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const content = importContent.value.trim();
+    if (!content) {
+      importStatus.textContent = 'Provide a file or paste a domain list first.';
+      importStatus.className = 'status error';
+      return;
+    }
+    importStatus.textContent = 'Importing…';
+    importStatus.className = 'status';
+    try {
+      const resp = await fetch('/api/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, skip_nikto: importSkipNikto.checked }),
+      });
+      const data = await resp.json();
+      importStatus.textContent = data.message || 'Done';
+      importStatus.className = 'status ' + (data.success ? 'success' : 'error');
+      if (data.success) {
+        importContent.value = '';
+        if (importFile) importFile.value = '';
+        fetchState();
+      }
+    } catch (err) {
+      importStatus.textContent = err.message;
+      importStatus.className = 'status error';
+    }
+  });
+}
+
 if (settingsForm) {
   // Create the save settings function that can be called from anywhere
   window.saveSettingsNow = async function() {
@@ -12417,6 +13184,7 @@ if (settingsForm) {
         enable_dnsx: settingsEnableDnsx ? settingsEnableDnsx.checked : true,
         enable_waybackurls: settingsEnableWaybackurls ? settingsEnableWaybackurls.checked : true,
         enable_gau: settingsEnableGau ? settingsEnableGau.checked : true,
+        enable_js_scan: settingsEnableJsScan ? settingsEnableJsScan.checked : true,
         subfinder_threads: settingsSubfinderThreads ? settingsSubfinderThreads.value : '',
         assetfinder_threads: settingsAssetfinderThreads ? settingsAssetfinderThreads.value : '',
         findomain_threads: settingsFindomainThreads ? settingsFindomainThreads.value : '',
@@ -13678,7 +14446,7 @@ def export_subdomains_csv(state: Dict[str, Any], filters: Dict[str, Any]) -> byt
             sub_data = subs[subdomain]
             if not _subdomain_matches_filters(subdomain, sub_data, filters):
                 continue
-            httpx = sub_data.get("httpx", {})
+            httpx = sub_data.get("httpx") or {}
             status_code = httpx.get("status_code", "")
             title = httpx.get("title", "")
             server = httpx.get("webserver", "")
@@ -13883,6 +14651,133 @@ def resume_target_scan(domain: str, wordlist: Optional[str] = None,
     return start_pipeline_job(normalized, wordlist_val, skip_flag, None)
 
 
+# Registrable-domain (eTLD+1) extraction. Not a full public-suffix list, just
+# the common multi-label suffixes so hosts like foo.google.co.uk group under
+# google.co.uk instead of the wrong co.uk.
+_MULTI_LABEL_SUFFIXES = {
+    "co.uk", "org.uk", "gov.uk", "ac.uk", "me.uk", "net.uk", "sch.uk",
+    "com.au", "net.au", "org.au", "edu.au", "gov.au", "id.au",
+    "co.nz", "net.nz", "org.nz", "govt.nz",
+    "co.jp", "or.jp", "ne.jp", "ac.jp", "go.jp",
+    "co.kr", "or.kr", "com.br", "net.br", "org.br", "gov.br",
+    "com.mx", "com.ar", "com.co", "com.tr", "com.sg", "com.hk", "com.cn",
+    "co.in", "co.za", "co.il", "co.th", "com.tw", "com.ua", "com.ph",
+}
+
+# Valid domain / FQDN (optionally leading "*."), used to filter import tokens.
+_IMPORT_DOMAIN_RE = re.compile(
+    r"^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"
+)
+
+
+def registrable_root(host: str) -> str:
+    """Return the eTLD+1 (registrable domain) for a host, best-effort."""
+    host = (host or "").strip().lower().strip(".")
+    while host.startswith("*."):
+        host = host[2:]
+    parts = [p for p in host.split(".") if p]
+    if len(parts) <= 2:
+        return ".".join(parts)
+    last_two = ".".join(parts[-2:])
+    if last_two in _MULTI_LABEL_SUFFIXES and len(parts) >= 3:
+        return ".".join(parts[-3:])
+    return last_two
+
+
+def parse_domain_import(content: str) -> List[str]:
+    """
+    Extract FQDNs from imported text. Supports:
+      - Plain lists (newline / comma separated)
+      - CSV / JSON (quoted values)
+      - Google bug-hunters .asciipb protobuf-text (fqdn: "host" entries)
+    Comment lines (# / //) and non-domain tokens (e.g. TIER0, {}) are ignored.
+    """
+    if not content:
+        return []
+    candidates: List[str] = []
+    # Quoted values cover asciipb `fqdn: "..."`, JSON and CSV.
+    candidates.extend(re.findall(r'"([^"]+)"', content))
+    # Bare tokens cover plain/comma lists.
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or line.startswith("//"):
+            continue
+        for tok in re.split(r"[\s,]+", line):
+            tok = tok.strip().strip('",:{}')
+            if tok:
+                candidates.append(tok)
+
+    hosts: List[str] = []
+    seen: set = set()
+    for cand in candidates:
+        cleaned = _sanitize_domain_input(cand)
+        if not cleaned or cleaned in seen:
+            continue
+        if _IMPORT_DOMAIN_RE.match(cleaned):
+            seen.add(cleaned)
+            hosts.append(cleaned)
+    return hosts
+
+
+# Enumerator flags pre-marked done for imported targets so the pipeline skips
+# subdomain discovery and jumps straight to downstream (dnsx/httpx/screenshots).
+_IMPORT_SKIP_ENUM_FLAGS = [
+    "amass_done", "subfinder_done", "assetfinder_done", "findomain_done",
+    "sublist3r_done", "crtsh_done", "github_subdomains_done",
+]
+
+
+def import_domains_and_run(content: str, skip_nikto: bool,
+                           interval: Optional[int]) -> Tuple[bool, str, Dict[str, Any]]:
+    """
+    Parse an imported domain list, add each host under its registrable root,
+    and dispatch a pipeline job per root that skips enumeration and runs the
+    downstream tooling (dnsx/httpx/screenshots/nuclei) on the imported hosts.
+    """
+    hosts = parse_domain_import(content)
+    if not hosts:
+        return False, "No valid domains found in the import.", {}
+
+    groups: Dict[str, List[str]] = {}
+    for host in hosts:
+        root = registrable_root(host)
+        if not root:
+            continue
+        bucket = groups.setdefault(root, [])
+        if host not in bucket:
+            bucket.append(host)
+
+    state = load_state()
+    for root, subs in groups.items():
+        ensure_target_state(state, root)
+        add_subdomains_to_state(state, root, subs, "import")
+        flags = ensure_target_state(state, root)["flags"]
+        for flag_key in _IMPORT_SKIP_ENUM_FLAGS:
+            flags[flag_key] = True
+    save_state(state)
+
+    dispatched: List[str] = []
+    failures: List[str] = []
+    for root in groups:
+        ok, msg = start_pipeline_job(root, None, skip_nikto, interval)
+        if ok:
+            dispatched.append(root)
+        else:
+            failures.append(msg)
+
+    summary = (
+        f"Imported {len(hosts)} host(s) across {len(groups)} domain(s); "
+        f"dispatched {len(dispatched)} job(s) (screenshots + tooling)."
+    )
+    if failures:
+        summary += " " + " ".join(failures)
+    return bool(dispatched), summary, {
+        "hosts": len(hosts),
+        "domains": len(groups),
+        "dispatched": dispatched,
+    }
+
+
 def start_targets_from_input(domain_input: str, wordlist: Optional[str],
                              skip_nikto: bool, interval: Optional[int]) -> Tuple[bool, str, List[Dict[str, Any]]]:
     cfg = get_config()
@@ -13962,9 +14857,11 @@ def start_pipeline_job(domain: str, wordlist: Optional[str], skip_nikto: bool, i
 
     if start_now:
         _start_job_thread(job_record)
+        persist_active_jobs()
         return True, f"Recon started for {normalized}."
 
     job_log_append(normalized, "Queued for execution.", "scheduler")
+    persist_active_jobs()
     return True, f"{normalized} queued; it will start when a worker is free."
 
 
@@ -16135,12 +17032,19 @@ form.addEventListener('submit', async (e) => {
                 if not target:
                     self._send_json({"success": False, "message": "Domain not found"}, status=HTTPStatus.NOT_FOUND)
                     return
+                # Self-heal: attach any on-disk screenshots missing from state.
+                try:
+                    if reconcile_screenshots_from_disk(state, domain) > 0:
+                        save_state(state)
+                        target = state.get("targets", {}).get(domain, target)
+                except Exception as exc:
+                    log(f"Screenshot reconcile failed for {domain}: {exc}")
                 screenshots = []
                 subdomains = target.get("subdomains", {})
                 for sub, data in subdomains.items():
                     screenshot = data.get("screenshot")
                     if screenshot and screenshot.get("path"):
-                        httpx = data.get("httpx", {})
+                        httpx = data.get("httpx") or {}
                         screenshots.append({
                             "subdomain": sub,
                             "path": screenshot["path"],
@@ -16836,6 +17740,47 @@ form.addEventListener('submit', async (e) => {
             self._send_json({"success": success, "message": message}, status=status)
             return
 
+        if self.path == "/api/import":
+            content = payload.get("content", "") or ""
+            interval_val = payload.get("interval")
+            interval_int: Optional[int] = None
+            if interval_val not in (None, ""):
+                try:
+                    interval_int = int(interval_val)
+                except (TypeError, ValueError):
+                    interval_int = None
+            skip_default = get_config().get("skip_nikto_by_default", False)
+            skip_nikto = bool_from_value(payload.get("skip_nikto"), skip_default)
+
+            success, message, info = import_domains_and_run(content, skip_nikto, interval_int)
+            status = HTTPStatus.OK if success else HTTPStatus.BAD_REQUEST
+            self._send_json({"success": success, "message": message, "info": info}, status=status)
+            return
+
+        if self.path == "/api/domain/js-scan":
+            domain = (payload.get("domain") or "").strip().lower()
+            if not domain:
+                self._send_json({"success": False, "message": "Domain is required."}, status=HTTPStatus.BAD_REQUEST)
+                return
+            state = load_state()
+            if domain not in state.get("targets", {}):
+                self._send_json({"success": False, "message": "Domain not found."}, status=HTTPStatus.NOT_FOUND)
+                return
+            cfg = get_config()
+
+            def _js_scan_async() -> None:
+                try:
+                    run_js_scan(domain, cfg, job_domain=None)
+                    st = load_state()
+                    ensure_target_state(st, domain)["flags"]["js_scan_done"] = True
+                    save_state(st)
+                except Exception as exc:
+                    log(f"Manual JS scan failed for {domain}: {exc}")
+
+            threading.Thread(target=_js_scan_async, name=f"jsscan-{domain}", daemon=True).start()
+            self._send_json({"success": True, "message": f"JS scan started for {domain}. Refresh in a moment."})
+            return
+
         if self.path == "/api/monitors":
             name = payload.get("name", "")
             url = payload.get("url", "")
@@ -17187,6 +18132,15 @@ def run_server(host: str, port: int, interval: int, use_https: bool = False, cer
     start_monitor_worker()
     start_system_resource_worker()  # Start system resource monitoring
     start_session_cleanup_worker()  # Start session cleanup
+
+    # Re-dispatch jobs that were active before the last shutdown, then start the
+    # periodic persister so future restarts can resume too.
+    try:
+        restore_active_jobs()
+    except Exception as exc:
+        log(f"Job restore failed: {exc}")
+    start_active_jobs_persister()
+
     generate_html_dashboard()
     server = ThreadingHTTPServer((host, port), CommandCenterHandler)
     
